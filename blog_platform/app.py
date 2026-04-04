@@ -365,6 +365,10 @@ def bulk_generate_for_all_accounts():
     2. Generate insights from articles
     3. Create 5 variants (one per account) with unique titles but same essence
     """
+    import time
+    start_time = time.time()
+    OPERATION_TIMEOUT = 50  # Stop after 50 seconds (leave 10s for response on 60s worker timeout)
+    
     if not blog_generator or not db:
         return jsonify({
             "error": "Blog generator not initialized",
@@ -410,6 +414,12 @@ def bulk_generate_for_all_accounts():
         
         generated_blogs = []
         for article in pending_articles:
+            # Check if we're running out of time
+            elapsed = time.time() - start_time
+            if elapsed > OPERATION_TIMEOUT - 10:  # Stop with 10 seconds buffer
+                logger.warning(f"⏱️ Operation timeout approaching ({elapsed:.1f}s) - stopping blog generation")
+                break
+            
             blog_data = blog_generator.generate_blog_from_article(article)
             if blog_data:
                 generated_blogs.append({
@@ -425,6 +435,8 @@ def bulk_generate_for_all_accounts():
                     {"$set": {"status": "processed"}}
                 )
                 logger.info(f"✓ Generated insight: {blog_data['title'][:50]}")
+            else:
+                logger.warning(f"⚠️ Failed to generate insight from: {article.get('title', 'Unknown')[:50]}")
         
         logger.info(f"✓ Generated {len(generated_blogs)} blog insights")
         
@@ -439,6 +451,12 @@ def bulk_generate_for_all_accounts():
     variants_per_account = {acc["account_id"]: 0 for acc in accounts}
     
     for blog_idx, blog in enumerate(generated_blogs, 1):
+        # Check if we're running out of time
+        elapsed = time.time() - start_time
+        if elapsed > OPERATION_TIMEOUT - 5:  # Stop with 5 seconds buffer
+            logger.warning(f"⏱️ Operation timeout approaching ({elapsed:.1f}s) - stopping variant generation")
+            break
+        
         logger.info(f"\n  Blog {blog_idx}/{len(generated_blogs)}: {blog['title'][:50]}")
         
         # Generate 5 variants of this blog

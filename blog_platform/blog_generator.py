@@ -100,7 +100,7 @@ Return valid JSON with CREATIVE title and engaging body fields only."""
                     "temperature": 0.8,
                     "max_tokens": 2000
                 },
-                timeout=120
+                timeout=30
             )
             
             logger.info(f"[GEN] API Response Status: {response.status_code}")
@@ -134,24 +134,26 @@ Return valid JSON with CREATIVE title and engaging body fields only."""
                 "body": parsed["body"].strip()
             }
             
+        except requests.exceptions.Timeout:
+            logger.error(f"[GEN] API request timed out (30s) - skipping this generation")
+            return None
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[GEN] Connection error: {e}")
+            return None
         except requests.exceptions.HTTPError as e:
-            logger.error(f"API HTTP error: {e.response.status_code} - {e.response.reason}")
-            logger.error(f"Response body: {e.response.text[:500]}")
+            logger.error(f"[GEN] HTTP error: {e.response.status_code} - {e.response.reason}")
             if e.response.status_code == 429:
-                logger.error("Rate limit exceeded (429)")
+                logger.error("[GEN] Rate limit exceeded (429) - skipping")
             elif e.response.status_code == 401:
-                logger.error("Unauthorized - check API key")
+                logger.error("[GEN] Unauthorized - check API key")
             elif e.response.status_code == 400:
-                logger.error("Bad request - check model name and parameters")
+                logger.error("[GEN] Bad request - check model name")
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {e}")
-            logger.error(f"Raw response was: {raw_response[:300] if 'raw_response' in locals() else 'N/A'}")
+            logger.error(f"[GEN] JSON decode error: {e}")
             return None
         except Exception as e:
-            logger.error(f"Blog generation error: {type(e).__name__}: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"[GEN] Blog generation error: {type(e).__name__}: {e}")
             return None
     
     def generate_blog_from_article(
@@ -221,7 +223,7 @@ Return ONLY valid JSON (no markdown):
 }}"""
 
         try:
-            logger.info(f"[FROM_ARTICLE] Calling OpenRouter API")
+            logger.info(f"[FROM_ARTICLE] Calling OpenRouter API with 30s timeout")
             response = requests.post(
                 f"{self.base_url}/chat/completions",
                 headers=self.headers,
@@ -231,10 +233,10 @@ Return ONLY valid JSON (no markdown):
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    "temperature": 0.85,
-                    "max_tokens": 2500
+                    "temperature": 0.8,
+                    "max_tokens": 2000
                 },
-                timeout=120
+                timeout=30
             )
             
             logger.info(f"[FROM_ARTICLE] API Response Status: {response.status_code}")
@@ -266,6 +268,12 @@ Return ONLY valid JSON (no markdown):
                 "source_article_title": article_title
             }
             
+        except requests.exceptions.Timeout:
+            logger.error(f"[FROM_ARTICLE] API request timeout (30s) - skipping")
+            return None
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[FROM_ARTICLE] Connection error - skipping")
+            return None
         except requests.exceptions.HTTPError as e:
             logger.error(f"[FROM_ARTICLE] API HTTP error: {e.response.status_code}")
             return None
@@ -394,7 +402,7 @@ Return valid JSON array ONLY."""
                     "temperature": 0.85,
                     "max_tokens": 4000
                 },
-                timeout=180
+                timeout=30
             )
             
             logger.info(f"[VARIANTS] API Response Status: {response.status_code}")
@@ -426,6 +434,12 @@ Return valid JSON array ONLY."""
             
             return valid_variants if valid_variants else None
             
+        except requests.exceptions.Timeout:
+            logger.error(f"[VARIANTS] API request timeout (30s) - skipping variant generation")
+            return None
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[VARIANTS] Connection error - skipping variant generation")
+            return None
         except requests.exceptions.HTTPError as e:
             logger.error(f"[VARIANTS] API HTTP error: {e.response.status_code}")
             return None
