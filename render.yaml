@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: megallm-blog-platform
+    runtime: python
+    pythonVersion: 3.11
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 4 --timeout 120 wsgi:app
+    envVars:
+      - key: MONGODB_URI
+        scope: run
+      - key: OPENROUTER_API_KEY
+        scope: run
+      - key: MONGODB_DB
+        value: megallm_blog_platform
+        scope: run
+      - key: OPENROUTER_MODEL
+        value: qwen/qwen3.6-plus-preview:free
+        scope: run
+      - key: FLASK_ENV
+        value: production
+        scope: run
+      - key: DEBUG
+        value: "False"
+        scope: run
+      - key: SECRET_KEY
+        scope: run
