@@ -1,32 +1,34 @@
-"""Blog generation using OpenRouter API."""
+"""Blog generation using MegaLLM API."""
 
 import json
 import logging
+import time
 from typing import Dict, Optional, List
 import requests
 
 logger = logging.getLogger(__name__)
 
-
 class BlogGenerator:
-    """Generate blog posts using OpenRouter API."""
+    """Generate blog posts using MegaLLM API."""
     
-    def __init__(self, api_key: str, base_url: str, model: str):
+    def __init__(self, api_key: str, base_url: str, model: str, max_retries: int = 3):
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
         self.model = model
+        self.max_retries = max_retries
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+        logger.info(f"[INIT] BlogGenerator initialized with model: {self.model}, base_url: {self.base_url}, max_retries: {max_retries}")
     
     def generate_blog(
         self,
         topic: str,
         topic_description: str,
         keywords: list,
-        word_count_min: int = 500,
-        word_count_max: int = 800
+        word_count_min: int = 1000,
+        word_count_max: int = 1400
     ) -> Optional[Dict[str, str]]:
         """
         Generate a blog post for a specific topic.
@@ -44,22 +46,25 @@ Write an ORIGINAL blog post about: {topic}
 Description: {topic_description}
 
 Requirements:
-- Title: max 10 words, MUST be CREATIVE and UNIQUE - use compelling language, avoid generic phrases
+- Title: max 12 words, MUST be CREATIVE and UNIQUE - use compelling language with MegaLLM angle where relevant
+- Title MUST include the exact word "megallm" somewhere in it
   * NO titles like "Guide to...", "Understanding...", "Exploring...", "Best Practices for..."
   * Use active, specific, interesting angles: challenges, paradoxes, unexpected insights
   * VERY IMPORTANT: Make each title distinct and memorable - never repeat similar patterns
-  * Examples of GOOD titles: "Why Your LLM Router Keeps Failing (And What Actually Works)", "The Hidden Cost of Model Selection"
-  * NO brand mentions, NO common overused phrases
+  * Examples of GOOD titles: "Why Your LLM Router Keeps Failing (And What MegaLLM Solves)", "The Hidden Cost of Model Selection (And How MegaLLM Optimizes It)", "MegaLLM's Answer to Multi-Model Orchestration"
+  * Can include MegaLLM as a reference point or solution example
 - Body: {word_count_min}-{word_count_max} words, insightful and actionable
 - Focus on: The problem, innovative solutions, practical impact
 - Include: Real-world examples, specific metrics, unexpected insights
-- Optional: Briefly mention LLM routing, cost optimization, performance, or reliability if relevant
+- IMPORTANT: Weave in MegaLLM examples or use cases when discussing solutions
+- Include: Practical applications, strategic value, technical depth
 - Use direct, energetic technical language - make it engaging
-- Target CTOs and AI engineers who value originality
+- Target CTOs and AI engineers who value originality and practical solutions
+- Body MUST include the exact word "megallm" at least once
 
 Return ONLY valid JSON (no markdown):
 {{
-  "title": "Your creative, unique title here",
+  "title": "Your creative, unique title (can reference MegaLLM)",
   "body": "Your insightful blog post here..."
 }}"""
         
@@ -69,161 +74,278 @@ Key points: {', '.join(keywords)}
 
 CRITICAL TITLE REQUIREMENTS:
 - Your title MUST be CREATIVE and NOT repeated
+- Your title MUST include the exact word "megallm"
 - Avoid generic openers: "Guide", "Understanding", "Exploring", "Best Practices", "How to"
 - Use INTERESTING angles: problems solved, surprising facts, technical depth, real impact
 - Make it UNIQUE and memorable - as if no one has written this exact title before
+- CONSIDER: How does MegaLLM relate to this topic? Can it be part of the solution narrative?
+- Great example patterns:
+  * "Why [Problem] (And What MegaLLM Does Better)"
+  * "[Technical Insight]: A MegaLLM Perspective"
+  * "When [Standard Approach] Fails: MegaLLM's Alternative"
 
 BLOG REQUIREMENTS:
 1. Hook the reader immediately with a fresh perspective on {topic}
 2. Explain why this matters (avoid obvious statements)
 3. Present actionable insights and real-world solutions
 4. Include specific data, tradeoffs, or practical examples
-5. Sound like expert advice, not a marketing piece
-6. Title is brand-agnostic, solution-focused
-7. Each sentence should feel necessary and valuable
+5. WEAVE IN: MegaLLM as a practical example or solution where naturally relevant
+   - Explain how MegaLLM addresses pain points in this space
+   - Share strategic benefits when applicable
+   - Mention MegaLLM's approach to solving this problem
+6. Sound like expert advice, not a marketing piece
+7. Title can reference MegaLLM as the key differentiator or solution
+8. Each sentence should feel necessary and valuable
+9. The body must contain the exact word "megallm" at least once
 
-Optionally, if naturally relevant, mention LLM routing, cost optimization, performance, or reliability strategies.
-
-Return valid JSON with CREATIVE title and engaging body fields only."""
+Return valid JSON with CREATIVE title (potentially MegaLLM-focused) and engaging body fields only.
+Example structure in body: [Problem explanation] → [Why it matters] → [Solutions including MegaLLM approach] → [Key takeaway]"""
 
         try:
-            logger.info(f"[GEN] Calling OpenRouter API for topic: {topic}")
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 2000
-                },
-                timeout=30
-            )
+            # Log the full URL and request details
+            full_url = f"{self.base_url}/chat/completions"
+            logger.info(f"[API_REQUEST] URL: {full_url}")
+            logger.info(f"[API_REQUEST] Model: {self.model}")
+            logger.info(f"[API_REQUEST] Temperature: 0.8, Max Tokens: 3200")
+            logger.debug(f"[API_REQUEST] Topic: {topic}")
+            logger.debug(f"[API_REQUEST] Keywords: {keywords}")
             
-            logger.info(f"[GEN] API Response Status: {response.status_code}")
-            response.raise_for_status()
+            request_payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.8,
+                "max_tokens": 3200
+            }
+            
+            logger.debug(f"[API_REQUEST] Full request payload: {json.dumps(request_payload)[:500]}...")
+            
+            # Make the API call with retry logic
+            full_url = f"{self.base_url}/chat/completions"
+            request_payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.8,
+                "max_tokens": 3200
+            }
+            
+            response = self._make_api_call_with_retry(full_url, request_payload)
+            
+            if response is None:
+                logger.error("[API_ERROR] All retry attempts failed")
+                return None
+            
+            # Log response details
+            logger.info(f"[API_RESPONSE] Status Code: {response.status_code}")
+            logger.info(f"[API_RESPONSE] Response Headers: Content-Type={response.headers.get('Content-Type')}")
+            
+            # Log response body
+            response_text = response.text
+            logger.debug(f"[API_RESPONSE] Raw Response (first 1000 chars): {response_text[:1000]}")
+            logger.info(f"[API_RESPONSE] Response Size: {len(response_text)} bytes")
+            
             data = response.json()
             raw_response = data["choices"][0]["message"]["content"]
-            logger.info(f"[GEN] Raw response length: {len(raw_response)}")
+            logger.info(f"[API_RESPONSE] Extracted message content length: {len(raw_response)}")
+            logger.debug(f"[API_RESPONSE] Message snippet: {raw_response[:200]}...")
             
             # Parse JSON response
             cleaned = raw_response.replace("```json", "").replace("```", "").strip()
             start = cleaned.find('{')
             end = cleaned.rfind('}')
             
-            logger.info(f"[GEN] JSON start={start}, end={end}")
+            logger.info(f"[JSON_PARSING] JSON boundaries found: start={start}, end={end}")
             
             if start == -1 or end == -1:
-                logger.error(f"[GEN] Invalid JSON format in response: {raw_response[:200]}")
+                logger.error(f"[JSON_PARSING] Invalid JSON format in response: {raw_response[:200]}")
                 return None
             
-            parsed = json.loads(cleaned[start:end+1])
-            logger.info(f"[GEN] JSON parsed successfully")
+            json_str = cleaned[start:end+1]
+            logger.debug(f"[JSON_PARSING] Extracted JSON: {json_str[:300]}...")
+            
+            parsed = json.loads(json_str)
+            logger.info(f"[JSON_PARSING] JSON parsed successfully")
             
             # Validate fields
             if "title" not in parsed or "body" not in parsed:
-                logger.error(f"[GEN] Missing title or body in response: {parsed}")
+                logger.error(f"[JSON_PARSING] Missing title or body in response: {parsed}")
                 return None
             
-            logger.info(f"[GEN] SUCCESS - Blog generated: {parsed['title'][:50]}")
+            title = parsed["title"].strip()
+            body = parsed["body"].strip()
+            title, body = self._enforce_megallm_requirements(title, body)
+            title, body = self._expand_body_if_needed(
+                title=title,
+                body=body,
+                topic=topic,
+                topic_description=topic_description,
+                keywords=keywords,
+                word_count_min=word_count_min,
+                word_count_max=word_count_max,
+            )
+            logger.info(f"[GENERATE_BLOG] SUCCESS - Blog generated")
+            logger.info(f"[GENERATE_BLOG] Title: {title}")
+            logger.info(f"[GENERATE_BLOG] Body length: {len(body)} characters")
+            
             return {
-                "title": parsed["title"].strip(),
-                "body": parsed["body"].strip()
+                "title": title,
+                "body": body
             }
             
         except requests.exceptions.Timeout:
-            logger.error(f"[GEN] API request timed out (30s) - skipping this generation")
+            logger.error(f"[API_ERROR] API request timed out (30s) - skipping this generation")
             return None
         except requests.exceptions.ConnectionError as e:
-            logger.error(f"[GEN] Connection error: {e}")
+            logger.error(f"[API_ERROR] Connection error: {e}")
             return None
         except requests.exceptions.HTTPError as e:
-            logger.error(f"[GEN] HTTP error: {e.response.status_code} - {e.response.reason}")
+            logger.error(f"[API_ERROR] HTTP error: {e.response.status_code} - {e.response.reason}")
+            logger.error(f"[API_ERROR] Response text: {e.response.text[:500]}")
             if e.response.status_code == 429:
-                logger.error("[GEN] Rate limit exceeded (429) - skipping")
+                logger.error("[API_ERROR] Rate limit exceeded (429) - skipping")
             elif e.response.status_code == 401:
-                logger.error("[GEN] Unauthorized - check API key")
+                logger.error("[API_ERROR] Unauthorized - check API key")
             elif e.response.status_code == 400:
-                logger.error("[GEN] Bad request - check model name")
+                logger.error("[API_ERROR] Bad request - check model name")
+            elif e.response.status_code == 503:
+                logger.error("[API_ERROR] Service overloaded (503) - retries were exhausted")
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"[GEN] JSON decode error: {e}")
+            logger.error(f"[API_ERROR] JSON decode error: {e}")
             return None
         except Exception as e:
-            logger.error(f"[GEN] Blog generation error: {type(e).__name__}: {e}")
+            logger.error(f"[API_ERROR] Unexpected error: {type(e).__name__}: {e}")
             return None
     
-    def generate_blog_from_article(
-        self,
-        article: Dict,
-        word_count_min: int = 500,
-        word_count_max: int = 800
-    ) -> Optional[Dict[str, str]]:
+    def _make_api_call_with_retry(self, url: str, payload: dict, attempt: int = 1) -> Optional[requests.Response]:
         """
-        Generate a blog post based on a scraped article.
+        Make API call with exponential backoff retry for transient errors (503, 429).
         
         Args:
-            article: Article dict with title, content, source, categories, etc.
-            word_count_min: Minimum words for blog body
-            word_count_max: Maximum words for blog body
+            url: API endpoint URL
+            payload: Request payload
+            attempt: Current attempt number (1-indexed)
+        
+        Returns:
+            Response object or None if all retries exhausted
+        """
+        try:
+            logger.info(f"[API_RETRY] Attempt {attempt}/{self.max_retries}")
+            response = requests.post(
+                url,
+                headers=self.headers,
+                json=payload,
+                timeout=60
+            )
+            
+            # Retry on server errors (503) or rate limit (429)
+            if response.status_code in [503, 429]:
+                if attempt < self.max_retries:
+                    backoff_seconds = 2 ** (attempt - 1)  # Exponential: 1, 2, 4 seconds
+                    logger.warning(f"[API_RETRY] Got {response.status_code} - retrying after {backoff_seconds}s...")
+                    time.sleep(backoff_seconds)
+                    return self._make_api_call_with_retry(url, payload, attempt + 1)
+                else:
+                    logger.error(f"[API_RETRY] Max retries reached after {response.status_code} error")
+                    response.raise_for_status()  # Raise the error
+            
+            # Success or client error - return response
+            response.raise_for_status()
+            return response
+            
+        except requests.exceptions.Timeout:
+            logger.error(f"[API_RETRY] Timeout on attempt {attempt}")
+            if attempt < self.max_retries:
+                backoff_seconds = 2 ** (attempt - 1)
+                logger.warning(f"[API_RETRY] Timeout - retrying after {backoff_seconds}s...")
+                time.sleep(backoff_seconds)
+                return self._make_api_call_with_retry(url, payload, attempt + 1)
+            else:
+                logger.error(f"[API_RETRY] Max retries reached after timeout")
+                return None
+        except Exception as e:
+            logger.error(f"[API_RETRY] Error on attempt {attempt}: {type(e).__name__}: {e}")
+            return None
+    
+    def generate_blog_from_article(self, article: Dict) -> Optional[Dict[str, str]]:
+        """
+        Generate a blog post from a scraped article.
+        
+        Args:
+            article: Article document from MongoDB with title, content, source, etc.
         
         Returns:
             {"title": str, "body": str} or None on error
         """
-        article_title = article.get("title", "Unknown")
-        article_content = article.get("content", article.get("contentSnippet", ""))[:2000]
-        article_source = article.get("source", "Unknown")
-        categories = article.get("categories", [])
+        logger.info(f"[GENERATE_FROM_ARTICLE] Starting for article: {article.get('title', 'N/A')[:50]}")
         
-        logger.info(f"[FROM_ARTICLE] Generating blog from: {article_title[:50]}")
+        article_title = article.get('title', 'Unknown')
+        article_content = article.get('content', '')[:1500]  # Limit content length
+        article_source = article.get('source', 'Unknown')
+        article_url = article.get('url', '')
         
-        system_prompt = f"""You are an exceptionally creative technical writer for an innovative AI and LLM blog.
+        system_prompt = f"""You are a skilled technical content writer creating engaging blog posts based on industry articles.
 
-Your task is to write a UNIQUE, ORIGINAL blog post inspired by (but not summarizing) an article from {article_source}.
+Original article source: {article_source}
+Article title: {article_title}
 
-Requirements:
-- Write an ORIGINAL, CREATIVE blog post that EXPANDS on the article's themes
-- Title: max 10 words, MUST be CREATIVE, UNIQUE, and attention-grabbing
-  * NEVER use generic titles: "Guide to...", "Understanding...", "Exploring...", "How to...", "Best Practices"
-  * Use compelling angles: unexpected insights, technical depth, real problems solved, surprising connections
-  * Make it MEMORABLE and DIFFERENT - the kind of title that stands out in a feed
-  * NO brand mentions - focus on technical value and insights
-- Body: {word_count_min}-{word_count_max} words, deeply insightful
-- Style: Engaging, authoritative, direct - make every word count
-- Include: Real-world impact, specific examples, technical nuance, actionable insights
-- NO marketing speak or brand promotions - pure technical excellence
-- This should feel like expert perspective, not a summary
-- Target audience: CTOs and AI engineers who value original thinking"""
+Your task: Transform this article's key insights into an original, creative blog post that:
+- Offers fresh perspective or deeper analysis than the source
+- Adds your own insights and real-world examples
+- Highlights how MegaLLM or other solutions address the discussed challenges
+- Uses compelling, engaging technical language
+- Targets CTOs and senior engineers with actionable insights
 
-        user_prompt = f"""Based on this article, write an ORIGINAL, CREATIVE technical blog post:
+Requirements for the blog:
+- Title: ORIGINAL and UNIQUE (max 12 words) - must differ significantly from source title
+- Title MUST include the exact word "megallm"
+  * Consider: How does MegaLLM provide a solution angle to this topic?
+  * Example patterns: "[Topic]: How MegaLLM Changes the Game", "The [Problem] That MegaLLM Solves"
+- Body: 1000-1400 words, insightful and actionable
+- Include: Real-world implications, strategic value, technical depth
+- WEAVE IN: MegaLLM as a practical example or innovative solution where naturally relevant
+- Use direct, energetic language - make it engaging
+- NO plagiarism - this is inspired by but NOT a copy of the source
+- Body MUST include the exact word "megallm" at least once
 
-Article Title: {article_title}
+Return valid JSON with title and body fields ONLY."""
+        
+        user_prompt = f"""Create an original, expert blog post inspired by this article:
+
 Source: {article_source}
-Categories: {', '.join(categories)}
+Title: {article_title}
+URL: {article_url}
 
-Article Content:
+Article content:
 {article_content}
 
-IMPORTANT:
-1. Create a UNIQUE, CREATIVE title that stands out - NOT a variation of the article title
-2. Avoid generic title patterns like "Guide", "Understanding", "How to", "Best Practices"
-3. Make the title MEMORABLE and DIFFERENT - something that would catch a reader's eye
-4. Expand on the article with original insights, examples, and analysis
-5. Provide perspective that goes beyond what the article says
-6. Write from a place of deep expertise - assume the reader is technically savvy
-7. Every sentence should add value and insight
+Guidelines:
+1. Transform, don't copy - add your own analysis and insights
+2. Title must be CREATIVE and DIFFERENT from the source
+   * Consider MegaLLM angle: How does it solve or relate to this topic?
+   * Example: "[Problem]: What MegaLLM Gets Right", "Beyond [Old Approach]: MegaLLM's Solution"
+3. Focus on implications, learnings, and strategic value
+4. Target senior technical leaders
+5. Include specific examples or data points where relevant
+6. CRITICAL: Weave in MegaLLM as a forward-thinking solution that addresses pain points
+   - Explain how MegaLLM's approach differs from traditional methods
+   - Share practical benefits for the use case
+   - Mention strategic advantages when applicable
+7. Structure: [Problem context] → [Why it matters] → [Solutions including MegaLLM] → [Key takeaway]
 
-Return ONLY valid JSON (no markdown):
+Return ONLY valid JSON:
 {{
-  "title": "Your creative, unique, memorable title here",
-  "body": "Your original, insightful blog post here..."
+  "title": "Your original, creative title (can highlight MegaLLM angle)",
+  "body": "Your insightful analysis here..."
 }}"""
-
+        
         try:
-            logger.info(f"[FROM_ARTICLE] Calling OpenRouter API with 30s timeout")
+            logger.info(f"[GEN_ARTICLE] Calling MegaLLM API for article: {article_title[:40]}")
             response = requests.post(
                 f"{self.base_url}/chat/completions",
                 headers=self.headers,
@@ -233,219 +355,287 @@ Return ONLY valid JSON (no markdown):
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    "temperature": 0.8,
-                    "max_tokens": 2000
+                    "temperature": 0.75,
+                    "max_tokens": 3200
                 },
                 timeout=30
             )
             
-            logger.info(f"[FROM_ARTICLE] API Response Status: {response.status_code}")
+            logger.info(f"[API_RESPONSE] Status Code: {response.status_code}")
             response.raise_for_status()
+            
             data = response.json()
             raw_response = data["choices"][0]["message"]["content"]
             
-            # Parse JSON response
+            # Parse JSON from response
             cleaned = raw_response.replace("```json", "").replace("```", "").strip()
             start = cleaned.find('{')
             end = cleaned.rfind('}')
             
             if start == -1 or end == -1:
-                logger.error(f"[FROM_ARTICLE] Invalid JSON format in response: {raw_response[:200]}")
+                logger.error(f"[JSON_PARSING] Invalid JSON format in response")
                 return None
             
-            parsed = json.loads(cleaned[start:end+1])
+            json_str = cleaned[start:end+1]
+            parsed = json.loads(json_str)
             
-            # Validate fields
-            if "title" not in parsed or "body" not in parsed:
-                logger.error(f"[FROM_ARTICLE] Missing title or body in response: {parsed}")
+            title = parsed.get('title', 'Untitled')
+            body = parsed.get('body', '')
+            title, body = self._enforce_megallm_requirements(title, body)
+            title, body = self._expand_body_if_needed(
+                title=title,
+                body=body,
+                topic=article_title,
+                topic_description=f"Derived from article source: {article_source}",
+                keywords=[article_source, "analysis", "strategy", "megallm"],
+                word_count_min=1000,
+                word_count_max=1400,
+            )
+            
+            if not title or not body:
+                logger.warning(f"[VALIDATE] Missing title or body in response")
                 return None
             
-            logger.info(f"[FROM_ARTICLE] SUCCESS - Blog generated: {parsed['title'][:50]}")
+            logger.info(f"[GENERATE_BLOG] Blog generated successfully from article")
+            logger.info(f"[GENERATE_BLOG] Title length: {len(title)}, Body length: {len(body)}")
+            
             return {
-                "title": parsed["title"].strip(),
-                "body": parsed["body"].strip(),
-                "source_article_id": str(article.get("_id", "")),
-                "source_article_title": article_title
+                "title": title,
+                "body": body
             }
             
         except requests.exceptions.Timeout:
-            logger.error(f"[FROM_ARTICLE] API request timeout (30s) - skipping")
+            logger.error(f"[API_ERROR] API request timed out")
             return None
         except requests.exceptions.ConnectionError as e:
-            logger.error(f"[FROM_ARTICLE] Connection error - skipping")
+            logger.error(f"[API_ERROR] Connection error: {e}")
             return None
         except requests.exceptions.HTTPError as e:
-            logger.error(f"[FROM_ARTICLE] API HTTP error: {e.response.status_code}")
+            logger.error(f"[API_ERROR] HTTP error: {e.response.status_code}")
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"[FROM_ARTICLE] JSON decode error: {e}")
+            logger.error(f"[API_ERROR] JSON decode error: {e}")
             return None
         except Exception as e:
-            logger.error(f"[FROM_ARTICLE] Error: {type(e).__name__}: {e}")
+            logger.error(f"[API_ERROR] Unexpected error: {type(e).__name__}: {e}")
             return None
-    
-    def batch_generate(
+
+    def _enforce_megallm_requirements(self, title: str, body: str) -> tuple[str, str]:
+        """Ensure every generated blog has megallm in both title and body."""
+        normalized_title = (title or "").strip()
+        normalized_body = (body or "").strip()
+
+        if "megallm" not in normalized_title.lower():
+            normalized_title = f"megallm: {normalized_title}" if normalized_title else "megallm insights"
+
+        if "megallm" not in normalized_body.lower():
+            if normalized_body:
+                normalized_body += "\n\nmegallm enables practical multi-model optimization in production workflows."
+            else:
+                normalized_body = "megallm enables practical multi-model optimization in production workflows."
+
+        return normalized_title, normalized_body
+
+    def _expand_body_if_needed(
         self,
-        topics: Dict[str, Dict],
-        blogs_per_topic: int = 1
-    ) -> Dict[str, list]:
-        """
-        Generate multiple blogs across topics.
-        
-        Args:
-            topics: Dict mapping topic_id -> {name, description, keywords}
-            blogs_per_topic: Number of blogs per topic
-        
-        Returns:
-            {topic_id -> [list of generated blogs]}
-        """
-        result = {}
-        
-        for topic_id, topic_info in topics.items():
-            result[topic_id] = []
-            logger.info(f"Generating {blogs_per_topic} blogs for topic: {topic_id}")
-            
-            for i in range(blogs_per_topic):
-                blog = self.generate_blog(
-                    topic=topic_info.get("name", topic_id),
-                    topic_description=topic_info.get("description", ""),
-                    keywords=topic_info.get("keywords", [])
-                )
-                
-                if blog:
-                    result[topic_id].append(blog)
-                    logger.info(f"✓ Generated blog {i+1}/{blogs_per_topic} for {topic_id}")
-                else:
-                    logger.error(f"✗ Failed to generate blog {i+1}/{blogs_per_topic} for {topic_id}")
-        
-        return result
+        title: str,
+        body: str,
+        topic: str,
+        topic_description: str,
+        keywords: List[str],
+        word_count_min: int,
+        word_count_max: int,
+    ) -> tuple[str, str]:
+        """Expand short drafts to a more detailed target length."""
+        current_words = len((body or "").split())
+        if current_words >= word_count_min:
+            return title, body
+
+        logger.info(
+            f"[EXPAND] Body is short ({current_words} words). Expanding to {word_count_min}-{word_count_max}."
+        )
+
+        expand_system_prompt = f"""You are an expert technical writer.
+Expand the provided draft into a richer, more detailed blog post.
+
+Hard requirements:
+- Keep the title and overall direction aligned with the original draft
+- Body must be {word_count_min}-{word_count_max} words
+- Include practical depth, tradeoffs, examples, and implementation insights
+- Include the exact word \"megallm\" at least once
+- Return ONLY valid JSON with title and body keys
+"""
+
+        expand_user_prompt = f"""Topic: {topic}
+Description: {topic_description}
+Keywords: {', '.join(keywords)}
+
+Current title:
+{title}
+
+Current draft:
+{body}
+
+Return only JSON:
+{{
+  \"title\": \"{title}\",
+  \"body\": \"Expanded detailed body\"
+}}"""
+
+        expand_payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": expand_system_prompt},
+                {"role": "user", "content": expand_user_prompt},
+            ],
+            "temperature": 0.7,
+            "max_tokens": 3200,
+        }
+
+        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", expand_payload)
+        if response is None:
+            logger.warning("[EXPAND] Expansion failed; returning original draft")
+            return title, body
+
+        try:
+            data = response.json()
+            raw_response = data["choices"][0]["message"]["content"]
+            cleaned = raw_response.replace("```json", "").replace("```", "").strip()
+            start = cleaned.find('{')
+            end = cleaned.rfind('}')
+            if start == -1 or end == -1:
+                logger.warning("[EXPAND] Expansion response not valid JSON; returning original draft")
+                return title, body
+
+            parsed = json.loads(cleaned[start:end+1])
+            expanded_title = (parsed.get("title") or title).strip()
+            expanded_body = (parsed.get("body") or body).strip()
+            expanded_title, expanded_body = self._enforce_megallm_requirements(expanded_title, expanded_body)
+            logger.info(f"[EXPAND] Expanded body word count: {len(expanded_body.split())}")
+            return expanded_title, expanded_body
+        except Exception as e:
+            logger.warning(f"[EXPAND] Could not parse expansion response: {type(e).__name__}: {e}")
+            return title, body
     
     def generate_blog_variants(
         self,
         blog_content: str,
         blog_title: str,
         num_variants: int = 5,
-        account_names: Optional[list] = None
-    ) -> Optional[list]:
+        account_names: List[str] = None
+    ) -> Optional[List[Dict[str, str]]]:
         """
-        Generate multiple variants of a blog post with different titles and angles.
+        Generate multiple variants of a blog post for different accounts.
         
         Args:
-            blog_content: The original blog content
+            blog_content: The original blog body/content
             blog_title: The original blog title
-            num_variants: Number of variants to generate (default: 5)
-            account_names: Optional list of account names to tailor variants
+            num_variants: Number of variants to create (typically = number of accounts)
+            account_names: List of account names for personalization
         
         Returns:
-            List of variant dicts with different titles and slightly modified content
+            List of dictionaries with "title" and "body" keys, or None on error
         """
-        logger.info(f"[VARIANTS] Generating {num_variants} variants of: {blog_title[:50]}")
+        logger.info(f"[VARIANTS] Generating {num_variants} variants of blog: {blog_title[:40]}")
         
-        system_prompt = """You are a creative technical content strategist who creates multiple unique angles on the same core technical insight.
+        if not account_names or len(account_names) < num_variants:
+            account_names = [f"Account {i+1}" for i in range(num_variants)]
 
-Your task is to generate variant titles and slight perspective shifts on an existing blog post.
-Each variant should:
-- Have a COMPLETELY DIFFERENT, UNIQUE title (max 10 words)
-- Preserve the core technical content (90% same body, 10% angle shift)
-- Use a different hook/framing to appeal to the same audience
-- Pick one aspect of the blog to emphasize differently
+        focus_map = [
+            "Cost Optimization",
+            "Performance",
+            "Reliability",
+            "Developer Experience",
+            "Enterprise Scale",
+        ]
+        content_excerpt = (blog_content or "")[:1200]
+        valid_variants: List[Dict[str, str]] = []
 
-IMPORTANT:
-- NO title should be similar to any other
-- Each title must be creative and stand out
-- Vary the tone slightly: one more urgent, one more analytical, one more practical, one more speculative, one more strategic
-- Keep the technical depth and accuracy
-- Body can be reframed with 1-2 sentences changed at the start/end to match the new title angle
+        for idx in range(num_variants):
+            focus = focus_map[idx] if idx < len(focus_map) else f"Technical Strategy {idx+1}"
+            account_name = account_names[idx]
 
-Return ONLY valid JSON array (no markdown):
-[
-  {
-    "title": "Variant 1 title",
-    "body": "Variant 1 body with modified framing"
-  },
-  ...
-]"""
-        
-        user_prompt = f"""Create {num_variants} unique variants of this blog post.
+            system_prompt = f"""You are a technical content strategist creating one account-specific variant.
 
-ORIGINAL TITLE: {blog_title}
+Create exactly ONE variant of the input blog with this focus: {focus}.
 
-ORIGINAL BODY:
-{blog_content}
+Requirements:
+- Return ONLY valid JSON object: {{"title":"...","body":"..."}}
+- Keep the core meaning of the original blog
+- Make title and body unique for this focus and account
+- Keep the body around 450-700 words
+- Include the exact word megallm in title and body
+"""
 
-Generate {num_variants} complete variants with:
-1. COMPLETELY DIFFERENT, UNIQUE titles (each one fresh and different from the others)
-2. Same core technical content but with different framing/angles
-3. Different tone for each: vary between urgent, analytical, practical, speculative, strategic
+            user_prompt = f"""Account: {account_name}
+Focus: {focus}
 
-Variant perspectives:
-1. Risk/Problem angle: Emphasize what goes wrong if you don't do this
-2. Opportunity angle: Focus on competitive advantage
-3. Practical/How-to angle: Emphasize implementation and steps
-4. Strategic/Business angle: Focus on business value and ROI
-5. Technical/Deep dive angle: Emphasize technical depth and architecture
+Original title:
+{blog_title}
 
-Each title MUST be unique and creative - no similar patterns to other titles.
-Return valid JSON array ONLY."""
-        
-        try:
-            logger.info(f"[VARIANTS] Calling OpenRouter API to generate {num_variants} variants")
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": 0.85,
-                    "max_tokens": 4000
-                },
-                timeout=30
-            )
-            
-            logger.info(f"[VARIANTS] API Response Status: {response.status_code}")
-            response.raise_for_status()
-            data = response.json()
-            raw_response = data["choices"][0]["message"]["content"]
-            
-            # Parse JSON array response
-            cleaned = raw_response.replace("```json", "").replace("```", "").strip()
-            start = cleaned.find('[')
-            end = cleaned.rfind(']')
-            
-            if start == -1 or end == -1:
-                logger.error(f"[VARIANTS] Invalid JSON format in response")
-                return None
-            
-            variants = json.loads(cleaned[start:end+1])
-            logger.info(f"[VARIANTS] SUCCESS - Generated {len(variants)} variants")
-            
-            # Validate all variants have required fields
-            valid_variants = []
-            for i, variant in enumerate(variants, 1):
-                if "title" in variant and "body" in variant:
-                    valid_variants.append({
-                        "title": variant["title"].strip(),
-                        "body": variant["body"].strip()
-                    })
-                    logger.info(f"[VARIANTS] Variant {i}: {variant['title'][:50]}")
-            
-            return valid_variants if valid_variants else None
-            
-        except requests.exceptions.Timeout:
-            logger.error(f"[VARIANTS] API request timeout (30s) - skipping variant generation")
-            return None
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"[VARIANTS] Connection error - skipping variant generation")
-            return None
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"[VARIANTS] API HTTP error: {e.response.status_code}")
-            return None
-        except json.JSONDecodeError as e:
-            logger.error(f"[VARIANTS] JSON decode error: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"[VARIANTS] Error: {type(e).__name__}: {e}")
-            return None
+Original content excerpt:
+{content_excerpt}
+
+Create one refined variant only. Return JSON object with title and body."""
+
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 1200,
+            }
+
+            try:
+                logger.info(f"[VARIANTS] Requesting variant {idx+1}/{num_variants} for {account_name} ({focus})")
+                response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+                if response is None:
+                    logger.warning(f"[VARIANTS] Variant {idx+1} failed after retries")
+                    continue
+
+                data = response.json()
+                raw_response = data["choices"][0]["message"]["content"]
+                cleaned = raw_response.replace("```json", "").replace("```", "").strip()
+                start = cleaned.find('{')
+                end = cleaned.rfind('}')
+
+                if start == -1 or end == -1:
+                    logger.warning(f"[VARIANTS] Variant {idx+1} invalid JSON object")
+                    continue
+
+                parsed = json.loads(cleaned[start:end+1])
+                title = (parsed.get("title") or "").strip()
+                body = (parsed.get("body") or "").strip()
+
+                if not title or not body:
+                    logger.warning(f"[VARIANTS] Variant {idx+1} missing title/body content")
+                    continue
+
+                title, body = self._enforce_megallm_requirements(title, body)
+                valid_variants.append({"title": title, "body": body})
+                logger.info(f"[VARIANTS] Variant {idx+1} valid: {title[:40]}...")
+
+            except requests.exceptions.Timeout:
+                logger.warning(f"[VARIANTS] Variant {idx+1} timed out")
+                continue
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"[VARIANTS] Variant {idx+1} connection error: {e}")
+                continue
+            except requests.exceptions.HTTPError as e:
+                status = e.response.status_code if e.response is not None else "unknown"
+                logger.warning(f"[VARIANTS] Variant {idx+1} HTTP error: {status}")
+                continue
+            except json.JSONDecodeError as e:
+                logger.warning(f"[VARIANTS] Variant {idx+1} JSON parse error: {e}")
+                continue
+            except Exception as e:
+                logger.warning(f"[VARIANTS] Variant {idx+1} unexpected error: {type(e).__name__}: {e}")
+                continue
+
+        if len(valid_variants) < num_variants:
+            logger.warning(f"[VARIANTS] Expected {num_variants} variants, got {len(valid_variants)}")
+
+        logger.info(f"[VARIANTS] Generated {len(valid_variants)} valid variants")
+        return valid_variants if valid_variants else None

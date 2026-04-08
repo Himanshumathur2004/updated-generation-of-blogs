@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import uuid
 import os
+import re
+import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
@@ -22,6 +24,42 @@ FEEDS = [
     "https://medium.com/feed/tag/large-language-models",
     "https://hnrss.org/best",
 ]
+
+
+def _extract_text_from_html(html: str) -> str:
+    """Extract readable text from HTML content."""
+    if not html:
+        return ""
+    
+    # Remove script and style tags
+    html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Remove HTML tags
+    text = re.sub(r'<[^>]+>', ' ', html)
+    
+    # Remove extra whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text[:5000]  # Limit to 5000 chars
+
+
+def _fetch_full_content(url: str, timeout: int = 10) -> str:
+    """Fetch full article content from URL."""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(url, timeout=timeout, headers=headers)
+        response.raise_for_status()
+        
+        # Extract text content from HTML
+        text = _extract_text_from_html(response.text)
+        return text if text else ""
+        
+    except Exception as e:
+        print(f"[WARN] Could not fetch full content from {url}: {e}")
+        return ""
 
 
 def _text(node: ET.Element | None) -> str | None:
@@ -72,7 +110,13 @@ def _source_from_url(url: str) -> str:
     return host or "rss"
 
 
-def parse_feed(url: str) -> list[dict]:
+def parse_feed(url: str, fetch_full_content: bool = False) -> list[dict]:
+    """Parse RSS feed and optionally fetch full article content.
+    
+    Args:
+        url: RSS feed URL
+        fetch_full_content: If True, fetch full HTML content from each article link
+    """
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
     root = ET.fromstring(resp.content)
@@ -95,14 +139,23 @@ def parse_feed(url: str) -> list[dict]:
         if not link and not guid:
             continue
 
+        # Fetch full content if requested
+        full_content = description or ""
+        if fetch_full_content and link:
+            print(f"  Fetching full content from: {link[:60]}...")
+            time.sleep(1)  # Rate limiting - be respectful
+            fetched = _fetch_full_content(link)
+            if fetched and len(fetched) > len(full_content):
+                full_content = fetched
+
         docs.append(
             {
                 "title": title,
                 "link": link,
                 "pubDate": pub_date,
                 "creator": creator,
-                "content": description,
-                "contentSnippet": description,
+                "content": full_content,  # Use full content if fetched, otherwise RSS description
+                "contentSnippet": description,  # Keep original RSS snippet
                 "guid": guid,
                 "categories": _categories(item),
                 "isoDate": _iso_date(pub_date),
@@ -110,17 +163,19 @@ def parse_feed(url: str) -> list[dict]:
                 "createdAt": now,
                 "status": "pending",
                 "fetchedFrom": url,
+                "fetchedFullContent": fetch_full_content and (len(full_content) > len(description or ""))  # Track if we enhanced content
             }
         )
 
     return docs
 
 
-def scrape_new_articles(limit: int = 0) -> dict:
+def scrape_new_articles(limit: int = 0, fetch_full_content: bool = False) -> dict:
     """Scrape feeds and insert only unseen articles; tag inserts with a scrape run id.
     
     Args:
         limit: Maximum number of articles to insert (0 = no limit)
+        fetch_full_content: If True, fetch full HTML content from each article link
     """
     bootstrap_env(__file__)
     
@@ -140,7 +195,8 @@ def scrape_new_articles(limit: int = 0) -> dict:
     # Collect all docs from all feeds
     for feed in FEEDS:
         try:
-            docs = parse_feed(feed)
+            print(f"Scraping feed: {feed[:60]}...")
+            docs = parse_feed(feed, fetch_full_content=fetch_full_content)
             all_docs.extend(docs)
         except Exception as exc:
             print(f"[WARN] feed failed: {feed} -> {exc}")
@@ -181,10 +237,16 @@ def main() -> None:
         default=0,
         help="Maximum number of articles to scrape (0 = no limit, default: 0)"
     )
+    parser.add_argument(
+        "--fetch-full-content",
+        action="store_true",
+        help="Fetch full HTML content from each article (slower but more detailed)"
+    )
     args = parser.parse_args()
     
-    summary = scrape_new_articles(limit=args.limit)
-    print(f"Scrape Summary: Inserted={summary['inserted']}, Skipped={summary['skipped']}, RunID={summary['scrape_run_id']}")
+    summary = scrape_new_articles(limit=args.limit, fetch_full_content=args.fetch_full_content)
+    mode = "with full content" if args.fetch_full_content else "RSS snippets only"
+    print(f"Scrape Summary ({mode}): Inserted={summary['inserted']}, Skipped={summary['skipped']}, RunID={summary['scrape_run_id']}")
 
 
 if __name__ == "__main__":

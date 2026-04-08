@@ -6,8 +6,9 @@ This guide explains how to deploy the Blog Generation Pipeline to Render.
 
 1. **GitHub Repository** - The code is already pushed to GitHub
 2. **MongoDB Atlas Account** - Free tier at https://www.mongodb.com/cloud/atlas
-3. **OpenRouter API Key** - Free tier at https://openrouter.ai
-4. **Render Account** - Create at https://render.com
+3. **MegaLLM API Key** - Get from https://beta.megallm.io
+4. **Render Account** - Create a
+t https://render.com
 
 ## Step-by-Step Deployment
 
@@ -21,11 +22,11 @@ This guide explains how to deploy the Blog Generation Pipeline to Render.
    mongodb+srv://username:password@cluster.mongodb.net/megallm_blog_platform?retryWrites=true&w=majority
    ```
 
-### 2. Get OpenRouter API Key
+### 2. Get MegaLLM API Key
 
-1. Sign up at https://openrouter.ai
+1. Sign up at https://beta.megallm.io
 2. Generate an API key
-3. The Qwen 3.6 Plus model is free to use
+3. The claude-opus-4-6 model is used for high-quality content generation
 
 ### 3. Deploy on Render
 
@@ -45,8 +46,8 @@ This guide explains how to deploy the Blog Generation Pipeline to Render.
 6. Add Environment Variables:
    ```
    MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/megallm_blog_platform?retryWrites=true&w=majority
-   OPENROUTER_API_KEY=sk-or-v1-YOUR_API_KEY
-   OPENROUTER_MODEL=qwen/qwen3.6-plus-preview:free
+   MEGALLM_API_KEY=sk-mega-YOUR_API_KEY
+   MODEL=claude-opus-4-6
    MONGODB_DB=megallm_blog_platform
    FLASK_ENV=production
    DEBUG=False
@@ -78,7 +79,7 @@ On the Render dashboard for your service:
 1. Go to "Environment" tab
 2. Add these variables:
    - `MONGODB_URI` - Your MongoDB Atlas connection string
-   - `OPENROUTER_API_KEY` - Your OpenRouter API key
+   - `MEGALLM_API_KEY` - Your MegaLLM API key
    - `FLASK_ENV` - Set to `production`
    - `DEBUG` - Set to `False`
    - `SECRET_KEY` - Generate a random string (use a secure generator)

@@ -9,13 +9,13 @@ services:
     envVars:
       - key: MONGODB_URI
         scope: run
-      - key: OPENROUTER_API_KEY
+      - key: MEGALLM_API_KEY
         scope: run
       - key: MONGODB_DB
         value: megallm_blog_platform
         scope: run
-      - key: OPENROUTER_MODEL
-        value: qwen/qwen3.6-plus-preview:free
+      - key: MEGALLM_MODEL
+        value: claude-opus-4-6
         scope: run
       - key: FLASK_ENV
         value: production

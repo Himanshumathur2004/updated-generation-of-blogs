@@ -49,4 +49,8 @@ def bootstrap_env(script_file: str) -> None:
 
 def resolve_api_key() -> str:
     """Resolve API key from common environment variable names."""
-    return os.getenv("MEGALLM_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+    return (
+        os.getenv("MEGALLM_API_KEY")
+        or os.getenv("OPENROUTER_API_KEY")
+        or ""
+    )

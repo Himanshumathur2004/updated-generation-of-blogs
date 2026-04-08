@@ -21,7 +21,7 @@ blog_generation_pipeline/
 │   ├── app.py                  # REST API server
 │   ├── config.py               # Configuration settings
 │   ├── database.py             # MongoDB models (with fallback)
-│   ├── blog_generator.py       # OpenRouter blog generation
+│   ├── blog_generator.py       # MegaLLM blog generation
 │   ├── insight_scheduler.py    # Insight-driven generation (stub)
 │   └── templates/
 │       └── index.html          # Web dashboard
@@ -47,7 +47,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env and fill in:
 # - MONGODB_URI (local or MongoDB Atlas)
-# - OPENROUTER_API_KEY (free at https://openrouter.ai)
+# - MEGALLM_API_KEY (get from https://beta.megallm.io)
 ```
 
 ### 3. Run the Server
@@ -68,9 +68,9 @@ Edit `.env` with your settings:
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DB=megallm_blog_platform
 
-# OpenRouter API Key (Required for blog generation)
-OPENROUTER_API_KEY=sk-or-v1-YOUR_KEY_HERE
-OPENROUTER_MODEL=qwen/qwen3.6-plus-preview:free  # Free tier model
+# MegaLLM API Key (Required for blog generation)
+MEGALLM_API_KEY=sk-mega-YOUR_KEY_HERE
+MODEL=claude-opus-4-6
 ```
 
 ### Get Required Credentials
@@ -79,9 +79,9 @@ OPENROUTER_MODEL=qwen/qwen3.6-plus-preview:free  # Free tier model
 - **Local:** Install MongoDB and run `mongod`
 - **Cloud:** Free tier at https://mongodb.com/cloud/atlas
 
-**OpenRouter API:**
-- Sign up at https://openrouter.ai (free)
-- The Qwen 3.6 Plus model is free to use
+**MegaLLM API:**
+- Sign up at https://beta.megallm.io
+- Use claude-opus-4-6 model
 
 ---
 
@@ -110,9 +110,9 @@ from blog_platform.blog_generator import BlogGenerator
 from blog_platform.config import Config
 
 gen = BlogGenerator(
-    api_key=Config.OPENROUTER_API_KEY,
-    base_url=Config.OPENROUTER_BASE_URL,
-    model=Config.OPENROUTER_MODEL
+    api_key=Config.MEGALLM_API_KEY,
+    base_url=Config.MEGALLM_BASE_URL,
+    model=Config.MODEL
 )
 
 blog = gen.generate_blog(
@@ -136,7 +136,7 @@ scrape_to_mongo.py → Articles in MongoDB
     ↓
 wf1.py (optional) → Content Analysis
     ↓
-BlogGenerator (OpenRouter API)
+BlogGenerator (MegaLLM API)
     ↓
 Flask API (/api/blogs/generate)
     ↓
@@ -153,10 +153,10 @@ Web Dashboard (http://localhost:5000)
 Pulls articles from RSS feeds and stores them in MongoDB. Prevents duplicates using guid/link.
 
 ### 2. **wf1.py**
-Content analysis stub. In production, would use OpenRouter to analyze articles for marketing angles.
+Content analysis stub. In production, would use MegaLLM to analyze articles for marketing angles.
 
 ### 3. **blog_platform/blog_generator.py**
-Calls OpenRouter API to generate blog posts. Takes topic + keywords → returns title + body.
+Calls MegaLLM API to generate blog posts. Takes topic + keywords → returns title + body.
 
 ### 4. **blog_platform/app.py**
 Flask REST API with routes:
@@ -295,7 +295,7 @@ python blog_platform/app.py
 ```bash
 # Set MongoDB URI and API key
 heroku config:set MONGODB_URI="mongodb+srv://..."
-heroku config:set OPENROUTER_API_KEY="sk-or-v1-..."
+heroku config:set MEGALLM_API_KEY="sk-mega-..."
 
 # Deploy
 git push heroku main
@@ -304,7 +304,7 @@ git push heroku main
 ### Docker (Optional)
 ```bash
 docker build -t blog-gen .
-docker run -p 5000:5000 -e MONGODB_URI=... -e OPENROUTER_API_KEY=... blog-gen
+docker run -p 5000:5000 -e MONGODB_URI=... -e MEGALLM_API_KEY=... blog-gen
 ```
 
 ---
@@ -317,8 +317,8 @@ docker run -p 5000:5000 -e MONGODB_URI=... -e OPENROUTER_API_KEY=... blog-gen
 - **Fallback:** App uses in-memory database automatically
 
 ### API Key Not Working
-- Verify `OPENROUTER_API_KEY` is set in `.env`
-- Check key is active at https://openrouter.ai
+- Verify `MEGALLM_API_KEY` is set in `.env`
+- Check key is active at https://beta.megallm.io
 - Ensure free tier is available (Qwen model)
 
 ### Blogs Not Generating
@@ -358,7 +358,7 @@ curl http://localhost:5000/api/dashboard/account_1 | jq .
 
 ## 💡 Tips
 
-1. **Free OpenRouter Usage:** Qwen 3.6 Plus is free — no API costs
+1. **MegaLLM Pipeline:** Uses claude-opus-4-6 model for high-quality content generation
 2. **Batch Generation:** Generate multiple blogs per topic for variety
 3. **Scheduling:** Set up cron job calling `/api/blogs/generate` every 2 hours
 4. **Scraping:** Run scraper daily to keep article pool fresh
@@ -376,7 +376,7 @@ This is a self-contained blog generation platform. All files needed are in this 
 
 - Check `.env.example` for required configuration
 - Ensure MongoDB is accessible
-- Verify OpenRouter API key is valid
+- Verify MegaLLM API key is valid
 - Review logs in Flask console for errors
 
 **Happy blogging!** 📝✨

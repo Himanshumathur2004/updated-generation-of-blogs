@@ -10,13 +10,15 @@ import sys
 
 # Add parent directory to path so we can import root-level modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add blog_platform to path for module imports
+sys.path.insert(0, str(Path(__file__).parent))
 
 from config import Config
 from database import Database
 from blog_generator import BlogGenerator
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Get template folder path
@@ -30,9 +32,9 @@ CORS(app)
 # Validate configuration
 def validate_config():
     """Validate required configuration."""
-    if not Config.OPENROUTER_API_KEY:
-        logger.error("ERROR: OPENROUTER_API_KEY not set in .env file!")
-        logger.error("Set OPENROUTER_API_KEY=sk-or-v1-... in .env")
+    # API key is now hardcoded in config
+    if not Config.MEGALLM_API_KEY:
+        logger.error("ERROR: MegaLLM API key not configured!")
         return False
     return True
 
@@ -45,7 +47,7 @@ try:
         raise ValueError("Configuration validation failed")
     
     db = Database(Config.MONGODB_URI, Config.MONGODB_DB)
-    blog_generator = BlogGenerator(Config.OPENROUTER_API_KEY, Config.OPENROUTER_BASE_URL, Config.OPENROUTER_MODEL)
+    blog_generator = BlogGenerator(Config.MEGALLM_API_KEY, Config.MEGALLM_BASE_URL, Config.MODEL)
     logger.info("✓ App initialized")
     
 except Exception as e:
@@ -218,6 +220,7 @@ def generation_history(account_id):
 @app.route("/api/blogs/generate", methods=["POST"])
 def generate_blogs():
     """Generate new blogs for an account."""
+    logger.info("[ENDPOINT] /api/blogs/generate POST request received")
     if not blog_generator or not db:
         return jsonify({
             "error": "Blog generator not initialized",
@@ -235,8 +238,12 @@ def generate_blogs():
     if not account:
         return jsonify({"error": f"Account {account_id} not found"}), 404
     
+    # Ensure topics_to_generate is a dict
     if not topics_to_generate:
         topics_to_generate = {topic_id: 3 for topic_id in Config.TOPICS.keys()}
+    elif isinstance(topics_to_generate, str):
+        # If a single topic ID is provided as string, generate 3 blogs for it
+        topics_to_generate = {topics_to_generate: 3}
     
     generated_count = 0
     error = None
@@ -398,8 +405,8 @@ def bulk_generate_for_all_accounts():
         logger.error(f"✗ Error scraping articles: {e}")
         articles_inserted = 0
     
-    # Step 2: Generate insights from pending articles
-    logger.info("\n💡 STEP 2: Generating insights from pending articles...")
+    # Step 2: Generate draft blogs instantly from articles (no API calls)
+    logger.info("\n💡 STEP 2: Creating draft blogs from pending articles (instant, no API calls)...")
     try:
         if db.is_memory:
             return jsonify({
@@ -408,40 +415,37 @@ def bulk_generate_for_all_accounts():
             }), 400
         
         articles_collection = db.db.articles
-        pending_articles = list(articles_collection.find({"status": "pending"}).limit(5))
+        pending_articles = list(articles_collection.find({"status": "pending"}).limit(3))  # Reduce to 3
         
         logger.info(f"Found {len(pending_articles)} pending articles")
         
         generated_blogs = []
         for article in pending_articles:
-            # Check if we're running out of time
-            elapsed = time.time() - start_time
-            if elapsed > OPERATION_TIMEOUT - 10:  # Stop with 10 seconds buffer
-                logger.warning(f"⏱️ Operation timeout approaching ({elapsed:.1f}s) - stopping blog generation")
-                break
+            # Create a quick draft from article without API call
+            article_title = article.get("title", "Untitled")
+            article_content = article.get("content", article.get("contentSnippet", ""))[:1000]
             
-            blog_data = blog_generator.generate_blog_from_article(article)
-            if blog_data:
-                generated_blogs.append({
-                    "title": blog_data["title"],
-                    "body": blog_data["body"],
-                    "source_article_id": str(article.get("_id", "")),
-                    "source_article_title": article.get("title", "")
-                })
-                
-                # Mark article as processed
-                articles_collection.update_one(
-                    {"_id": article["_id"]},
-                    {"$set": {"status": "processed"}}
-                )
-                logger.info(f"✓ Generated insight: {blog_data['title'][:50]}")
-            else:
-                logger.warning(f"⚠️ Failed to generate insight from: {article.get('title', 'Unknown')[:50]}")
+            # Create simple title from article
+            simple_title = article_title[:60] + ("..." if len(article_title) > 60 else "")
+            
+            generated_blogs.append({
+                "title": simple_title,
+                "body": article_content,
+                "source_article_id": str(article.get("_id", "")),
+                "source_article_title": article_title
+            })
+            
+            # Mark article as processed
+            articles_collection.update_one(
+                {"_id": article["_id"]},
+                {"$set": {"status": "processed"}}
+            )
+            logger.info(f"✓ Created draft: {simple_title[:50]}")
         
-        logger.info(f"✓ Generated {len(generated_blogs)} blog insights")
+        logger.info(f"✓ Created {len(generated_blogs)} draft blogs")
         
     except Exception as e:
-        logger.error(f"✗ Error generating insights: {e}")
+        logger.error(f"✗ Error creating drafts: {e}")
         generated_blogs = []
     
     # Step 3: Create 5 variants for each generated blog (one per account)
@@ -524,3 +528,4 @@ def bulk_generate_for_all_accounts():
 
 if __name__ == "__main__":
     app.run(debug=Config.DEBUG, host="0.0.0.0", port=5000)
+

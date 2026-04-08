@@ -21,23 +21,20 @@ class Config:
         raise ValueError("MONGODB_URI environment variable must be set")
     MONGODB_DB = os.getenv("MONGODB_DB", "megallm_blog_platform")
     
-    # OpenRouter API Configuration (Primary)
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-    if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY environment variable must be set in .env file.")
-    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen3.6-plus-preview:free")
+    # MegaLLM API Configuration (Primary)
+    MEGALLM_API_KEY = os.getenv("MEGALLM_API_KEY")
+    MEGALLM_BASE_URL = os.getenv("MEGALLM_BASE_URL", "https://beta.megallm.io/v1")
+    MEGALLM_MODEL_CONTENT = os.getenv("MEGALLM_MODEL_CONTENT", "claude-opus-4-6")
+    MEGALLM_MODEL_FAST = os.getenv("MEGALLM_MODEL_FAST", "claude-opus-4-6")
+    MEGALLM_MODEL_ANALYSIS = os.getenv("MEGALLM_MODEL_ANALYSIS", "claude-opus-4-6")
+    MODEL = os.getenv("MODEL", "claude-opus-4-6")
     
-    # Backward compatibility - map OPENROUTER to MEGALLM names
-    MEGALLM_API_KEY = OPENROUTER_API_KEY
-    MEGALLM_BASE_URL = OPENROUTER_BASE_URL
-    MEGALLM_MODEL = OPENROUTER_MODEL
-    
+
     # Blog Generation Config
-    BLOG_WORD_COUNT_MIN = 500
-    BLOG_WORD_COUNT_MAX = 800
+    BLOG_WORD_COUNT_MIN = 1000
+    BLOG_WORD_COUNT_MAX = 1400
     BLOG_TEMPERATURE = 0.65
-    BLOG_MAX_TOKENS = 2000
+    BLOG_MAX_TOKENS = 3200
     
     # Schedule Config
     BLOGS_PER_24_HOURS = 12  # 3 per topic × 4 topics
