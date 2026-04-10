@@ -177,8 +177,17 @@ def index():
 
 @app.route("/api/accounts", methods=["GET"])
 def get_accounts():
-    """Get all accounts."""
-    accounts = db.get_all_accounts()
+    """Get all accounts. Names/descriptions always come from Config, not MongoDB."""
+    db_accounts = {a["account_id"]: a for a in db.get_all_accounts()}
+
+    accounts = []
+    for cfg in Config.ACCOUNTS:
+        doc = db_accounts.get(cfg["id"], {})
+        doc["name"] = cfg["name"]
+        doc["description"] = cfg.get("description", "")
+        doc["account_id"] = cfg["id"]
+        accounts.append(doc)
+
     return jsonify({"accounts": accounts}), 200
 
 
