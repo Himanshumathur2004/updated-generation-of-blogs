@@ -90,6 +90,8 @@
         </div>
 
         <div class="controls">
+            <button id="mediumGenerateBtn" class="btn btn-primary" onclick="generateMediumPost()">📰 Generate Medium Post</button>
+            <button id="quoraGenerateBtn" class="btn btn-primary" onclick="generateQuoraPost()">❓ Generate Quora Post</button>
             <button class="btn btn-primary" onclick="bulkGenerateAll()">⚡ Bulk Generate (All Accounts)</button>
             <button class="btn btn-secondary" onclick="refreshDashboard()">🔄 Refresh</button>
             <button class="btn btn-secondary" onclick="showClearModal()">🗑️ Clear Blogs</button>
@@ -131,11 +133,21 @@
                     <button class="btn-copy-modal" onclick="copyBody()">📋 Copy</button>
                 </div>
             </div>
+
+            <div class="copy-section" style="margin-bottom: 0;">
+                <h3>🚀 Quick Copy</h3>
+                <div class="copy-row">
+                    <div class="copy-box" style="min-height: 44px; display: flex; align-items: center;">Copy title and description together for one-step paste.</div>
+                    <button class="btn-copy-modal" onclick="copyFullPost()">📋 Copy Full Post</button>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
         const API_BASE = '/api';
+        const MEDIUM_ACCOUNT_ID = 'account_5';
+        const QUORA_ACCOUNT_ID = 'account_4';
         let currentAccount = null;
         let currentFilter = 'all';
         let blogs = [];
@@ -156,6 +168,7 @@
                     const btn = document.createElement('button');
                     btn.className = 'account-btn';
                     btn.textContent = account.name;
+                    btn.dataset.accountId = account.account_id;
                     btn.onclick = () => selectAccount(account.account_id, btn);
                     selector.appendChild(btn);
                 });
@@ -286,6 +299,17 @@
             });
         }
 
+        function copyFullPost() {
+            if (!currentBlogToCopy) return;
+            const payload = `${currentBlogToCopy.title}\n\n${currentBlogToCopy.body}`;
+            navigator.clipboard.writeText(payload).then(() => {
+                showToast('✅ Full post copied!', 'success');
+            }).catch(err => {
+                console.error('Failed to copy full post:', err);
+                showToast('Error copying full post', 'error');
+            });
+        }
+
         async function bulkGenerateAll() {
             const btn = event.target;
             btn.disabled = true;
@@ -308,6 +332,76 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = '⚡ Bulk Generate (All Accounts)';
+            }
+        }
+
+        async function generateMediumPost() {
+            const btn = document.getElementById('mediumGenerateBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating Medium Post...';
+
+            try {
+                const response = await fetch(`${API_BASE}/blogs/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_id: MEDIUM_ACCOUNT_ID,
+                        topics: { performance: 1 }
+                    })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    const mediumBtn = document.querySelector(`.account-btn[data-account-id="${MEDIUM_ACCOUNT_ID}"]`);
+                    if (mediumBtn) {
+                        selectAccount(MEDIUM_ACCOUNT_ID, mediumBtn);
+                    }
+                    await refreshDashboard();
+                    showToast(`✅ Generated ${data.generated_count || 1} Medium post`, 'success');
+                } else {
+                    showToast(`⚠️ ${data.error || 'Medium generation failed'}`, 'error');
+                }
+            } catch (err) {
+                console.error('Error generating Medium post:', err);
+                showToast('Error generating Medium post', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📰 Generate Medium Post';
+            }
+        }
+
+        async function generateQuoraPost() {
+            const btn = document.getElementById('quoraGenerateBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating Quora Post...';
+
+            try {
+                const response = await fetch(`${API_BASE}/blogs/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_id: QUORA_ACCOUNT_ID,
+                        topics: { performance: 1 }
+                    })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    const quoraBtn = document.querySelector(`.account-btn[data-account-id="${QUORA_ACCOUNT_ID}"]`);
+                    if (quoraBtn) {
+                        selectAccount(QUORA_ACCOUNT_ID, quoraBtn);
+                    }
+                    await refreshDashboard();
+                    showToast(`✅ Generated ${data.generated_count || 1} Quora post`, 'success');
+                } else {
+                    showToast(`⚠️ ${data.error || 'Quora generation failed'}`, 'error');
+                }
+            } catch (err) {
+                console.error('Error generating Quora post:', err);
+                showToast('Error generating Quora post', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '❓ Generate Quora Post';
             }
         }
 

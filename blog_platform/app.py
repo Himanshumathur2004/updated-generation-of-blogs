@@ -84,6 +84,41 @@ def init_accounts():
 init_accounts()
 
 
+def get_medium_settings() -> dict:
+    """Return Medium metadata defaults for the dedicated Medium account."""
+    return {
+        "author_name": Config.MEDIUM_AUTHOR_NAME,
+        "author_handle": Config.MEDIUM_AUTHOR_HANDLE,
+        "author_twitter": Config.MEDIUM_AUTHOR_TWITTER,
+        "publication_slug": Config.MEDIUM_PUBLICATION_SLUG,
+        "hero_image_url": Config.MEDIUM_HERO_IMAGE_URL,
+        "hero_image_alt": "MegaLLM deep-dive article cover",
+        "backlink_url": Config.MEGALLM_BACKLINK_URL,
+    }
+
+
+def get_quora_settings() -> dict:
+    """Return Quora metadata defaults for the dedicated Quora account."""
+    return {
+        "site_name": Config.QUORA_SITE_NAME,
+        "twitter_handle": Config.QUORA_TWITTER_HANDLE,
+        "fb_app_id": Config.QUORA_FB_APP_ID,
+        "base_url": Config.QUORA_BASE_URL,
+        "ios_app_store_id": Config.QUORA_IOS_APP_STORE_ID,
+        "ios_app_name": Config.QUORA_IOS_APP_NAME,
+        "android_package": Config.QUORA_ANDROID_PACKAGE,
+        "android_app_name": Config.QUORA_ANDROID_APP_NAME,
+        "app_deep_link_path": Config.QUORA_APP_DEEP_LINK_PATH,
+        "author_name": Config.QUORA_AUTHOR_NAME,
+        "author_slug": Config.QUORA_AUTHOR_SLUG,
+        "author_profile_url": Config.QUORA_AUTHOR_PROFILE_URL,
+        "question_asker_name": Config.QUORA_QUESTION_ASKER_NAME,
+        "image_url": Config.QUORA_IMAGE_URL,
+        "image_alt": "Quora-style question and answer cover",
+        "locale": "en_US",
+    }
+
+
 # ============================================================================
 # STATIC & TEMPLATE ROUTES
 # ============================================================================
@@ -247,23 +282,65 @@ def generate_blogs():
     
     generated_count = 0
     error = None
-    
+
+    # For Quora/Medium accounts: scrape fresh articles first, use them as content source
+    articles_pool = []
+    if account_id in {Config.QUORA_ACCOUNT_ID, Config.MEDIUM_ACCOUNT_ID} and not db.is_memory:
+        try:
+            from scrape_to_mongo import scrape_new_articles
+            total_needed = sum(topics_to_generate.values())
+            scrape_result = scrape_new_articles(limit=max(5, total_needed))
+            logger.info(f"[SCRAPE] Inserted {scrape_result.get('inserted', 0)} new articles before generation")
+            articles_pool = list(db.db.articles.find({"status": "pending"}).limit(total_needed * 2))
+            logger.info(f"[SCRAPE] {len(articles_pool)} pending articles available for generation")
+        except Exception as e:
+            logger.warning(f"[SCRAPE] Failed, falling back to topic-based generation: {e}")
+            articles_pool = []
+
     try:
         for topic_id, count in topics_to_generate.items():
             if topic_id not in Config.TOPICS:
                 continue
-            
+
             topic_info = Config.TOPICS[topic_id]
-            
+
             for i in range(count):
-                logger.info(f"Generating blog for topic: {topic_id}")
-                blog_data = blog_generator.generate_blog(
-                    topic=topic_info["name"],
-                    topic_description=topic_info["description"],
-                    keywords=topic_info["keywords"]
-                )
+                # Use a scraped article if available, else fall back to topic-based
+                article = articles_pool.pop(0) if articles_pool else None
+
+                if article:
+                    logger.info(f"Generating from article: {article.get('title', 'N/A')[:60]}")
+                    blog_data = blog_generator.generate_blog_from_article(article)
+                    # Mark article as processed
+                    try:
+                        db.db.articles.update_one({"_id": article["_id"]}, {"$set": {"status": "processed"}})
+                    except Exception:
+                        pass
+                else:
+                    logger.info(f"No article available, generating from topic: {topic_id}")
+                    blog_data = blog_generator.generate_blog(
+                        topic=topic_info["name"],
+                        topic_description=topic_info["description"],
+                        keywords=topic_info["keywords"]
+                    )
                 
                 if blog_data:
+                    if account_id == Config.MEDIUM_ACCOUNT_ID:
+                        blog_data = blog_generator.package_medium_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=topic_info["keywords"],
+                            topic=topic_info["name"],
+                            medium_settings=get_medium_settings(),
+                        )
+                    elif account_id == Config.QUORA_ACCOUNT_ID:
+                        blog_data = blog_generator.package_quora_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=topic_info["keywords"],
+                            topic=topic_info["name"],
+                            quora_settings=get_quora_settings(),
+                        )
                     blog_data["account_id"] = account_id
                     blog_data["topic"] = topic_id
                     db.insert_blog(blog_data)
@@ -330,6 +407,23 @@ def generate_blogs_from_articles():
                 blog_data = blog_generator.generate_blog_from_article(article)
                 
                 if blog_data:
+                    article_topic = article.get("title", "general")
+                    if account_id == Config.MEDIUM_ACCOUNT_ID:
+                        blog_data = blog_generator.package_medium_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=blog_data.get("tags", [article.get("source", "AI")]),
+                            topic=article_topic,
+                            medium_settings=get_medium_settings(),
+                        )
+                    elif account_id == Config.QUORA_ACCOUNT_ID:
+                        blog_data = blog_generator.package_quora_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=blog_data.get("tags", [article.get("source", "AI")]),
+                            topic=article_topic,
+                            quora_settings=get_quora_settings(),
+                        )
                     blog_data["account_id"] = account_id
                     blog_data["source_type"] = "scraped_article"
                     db.insert_blog(blog_data)
@@ -387,7 +481,10 @@ def bulk_generate_for_all_accounts():
     logger.info("="*80)
     
     # Get all accounts
-    accounts = db.get_all_accounts()
+    accounts = [
+        acc for acc in db.get_all_accounts()
+        if acc["account_id"] not in {Config.MEDIUM_ACCOUNT_ID, Config.QUORA_ACCOUNT_ID}
+    ]
     if not accounts:
         return jsonify({"error": "No accounts found"}), 404
     
@@ -477,18 +574,40 @@ def bulk_generate_for_all_accounts():
             # Assign one variant per account
             for account_idx, account in enumerate(accounts):
                 variant = variants[account_idx]
+
+                if account["account_id"] == Config.MEDIUM_ACCOUNT_ID:
+                    variant = blog_generator.package_medium_post(
+                        title=variant.get("title", ""),
+                        body=variant.get("body", ""),
+                        keywords=["MegaLLM", "AI", "Medium", "LLM", "Engineering"],
+                        topic=blog.get("title", "MegaLLM Insights"),
+                        medium_settings=get_medium_settings(),
+                    )
+                elif account["account_id"] == Config.QUORA_ACCOUNT_ID:
+                    variant = blog_generator.package_quora_post(
+                        title=variant.get("title", ""),
+                        body=variant.get("body", ""),
+                        keywords=["MegaLLM", "AI", "Quora", "LLM", "Engineering"],
+                        topic=blog.get("title", "MegaLLM Insights"),
+                        quora_settings=get_quora_settings(),
+                    )
                 
                 blog_entry = {
                     "title": variant["title"],
                     "body": variant["body"],
+                    "description": variant.get("description", ""),
                     "account_id": account["account_id"],
                     "status": "draft",
                     "source_type": "bulk_generated",
                     "source_article_id": blog.get("source_article_id", ""),
                     "source_article_title": blog.get("source_article_title", ""),
                     "variant_of": blog["title"],
+                    "tags": variant.get("tags") or ["MegaLLM", "AI", "LLM", "Engineering", "Automation"],
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
+
+                if variant.get("post_format"):
+                    blog_entry["post_format"] = variant["post_format"]
                 
                 db.insert_blog(blog_entry)
                 variants_per_account[account["account_id"]] += 1

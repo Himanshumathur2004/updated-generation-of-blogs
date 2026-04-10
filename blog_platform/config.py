@@ -28,6 +28,42 @@ class Config:
     MEGALLM_MODEL_FAST = os.getenv("MEGALLM_MODEL_FAST", "claude-opus-4-6")
     MEGALLM_MODEL_ANALYSIS = os.getenv("MEGALLM_MODEL_ANALYSIS", "claude-opus-4-6")
     MODEL = os.getenv("MODEL", "claude-opus-4-6")
+    MEGALLM_BACKLINK_URL = os.getenv("MEGALLM_BACKLINK_URL", "https://beta.megallm.io")
+
+    # Medium account configuration (only this account generates Medium-ready posts)
+    MEDIUM_ACCOUNT_ID = os.getenv("MEDIUM_ACCOUNT_ID", "account_5")
+    MEDIUM_PUBLICATION_SLUG = os.getenv("MEDIUM_PUBLICATION_SLUG", "")
+    MEDIUM_AUTHOR_NAME = os.getenv("MEDIUM_AUTHOR_NAME", "MegaLLM Editorial Team")
+    MEDIUM_AUTHOR_HANDLE = os.getenv("MEDIUM_AUTHOR_HANDLE", "megallm")
+    MEDIUM_AUTHOR_TWITTER = os.getenv("MEDIUM_AUTHOR_TWITTER", "@megallm")
+    MEDIUM_HERO_IMAGE_URL = os.getenv(
+        "MEDIUM_HERO_IMAGE_URL",
+        "https://miro.medium.com/v2/resize:fit:1200/1*m-R_BkNf1Qjr1YbyOIJY2w.png",
+    )
+
+    # Quora account configuration (only this account generates Quora-ready posts)
+    QUORA_ACCOUNT_ID = os.getenv("QUORA_ACCOUNT_ID", "account_4")
+    QUORA_SITE_NAME = os.getenv("QUORA_SITE_NAME", "Quora")
+    QUORA_TWITTER_HANDLE = os.getenv("QUORA_TWITTER_HANDLE", "@Quora")
+    QUORA_FB_APP_ID = os.getenv("QUORA_FB_APP_ID", "111614425571516")
+    QUORA_BASE_URL = os.getenv("QUORA_BASE_URL", "https://www.quora.com")
+    QUORA_IOS_APP_STORE_ID = os.getenv("QUORA_IOS_APP_STORE_ID", "456034437")
+    QUORA_IOS_APP_NAME = os.getenv("QUORA_IOS_APP_NAME", "Quora")
+    QUORA_ANDROID_PACKAGE = os.getenv("QUORA_ANDROID_PACKAGE", "com.quora.android")
+    QUORA_ANDROID_APP_NAME = os.getenv("QUORA_ANDROID_APP_NAME", "Quora")
+    QUORA_APP_DEEP_LINK_PATH = os.getenv("QUORA_APP_DEEP_LINK_PATH", "")
+    QUORA_AUTHOR_NAME = os.getenv("QUORA_AUTHOR_NAME", "MegaLLM Editorial Team")
+    QUORA_AUTHOR_HANDLE = os.getenv("QUORA_AUTHOR_HANDLE", "megallm")
+    QUORA_AUTHOR_SLUG = os.getenv("QUORA_AUTHOR_SLUG", "MegaLLM-Editorial-Team")
+    QUORA_AUTHOR_PROFILE_URL = os.getenv(
+        "QUORA_AUTHOR_PROFILE_URL",
+        "https://www.quora.com/profile/MegaLLM-Editorial-Team",
+    )
+    QUORA_QUESTION_ASKER_NAME = os.getenv("QUORA_QUESTION_ASKER_NAME", "Anonymous")
+    QUORA_IMAGE_URL = os.getenv(
+        "QUORA_IMAGE_URL",
+        "https://qph.cf2.quoracdn.net/main-qimg-example.jpeg",
+    )
     
 
     # Blog Generation Config
@@ -50,8 +86,8 @@ class Config:
             "blogs_per_cycle": 3
         },
         "performance": {
-            "name": "Performance & Speed",
-            "description": "How MegaLLM improves latency and throughput with intelligent routing, parallel processing, and performance optimization",
+            "name": "AI Speed and Latency",
+            "description": "How MegaLLM improves response speed through smarter model routing, batching, and token optimization — without increasing infrastructure cost",
             "keywords": ["latency", "speed", "throughput", "performance", "tokens per second", "response time", "optimization"],
             "megallm_focus": "Speed and efficiency improvements",
             "blogs_per_cycle": 3
@@ -83,5 +119,10 @@ class Config:
         {"id": "account_2", "name": "InferenceDaily", "description": "Secondary publication"},
         {"id": "account_3", "name": "AGIorBust", "description": "Backup content"},
         {"id": "account_4", "name": "TokenAIz", "description": "Regional focus"},
-        {"id": "account_5", "name": "TokensAndTakes", "description": "Specialized topics"},
+        {
+            "id": "account_5",
+            "name": "TokensAndTakes",
+            "description": "Medium-only publishing account",
+            "medium_only": True,
+        },
     ]

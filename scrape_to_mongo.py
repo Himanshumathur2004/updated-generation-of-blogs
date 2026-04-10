@@ -23,6 +23,11 @@ FEEDS = [
     "https://medium.com/feed/tag/ai-agent",
     "https://medium.com/feed/tag/large-language-models",
     "https://hnrss.org/best",
+    # Quora trending questions — real questions people are asking right now
+    "https://www.quora.com/topic/Large-Language-Models/rss",
+    "https://www.quora.com/topic/Artificial-Intelligence/rss",
+    "https://www.quora.com/topic/OpenAI/rss",
+    "https://www.quora.com/topic/Machine-Learning/rss",
 ]
 
 
@@ -107,6 +112,8 @@ def _source_from_url(url: str) -> str:
         return "medium"
     if "hnrss" in host:
         return "hn"
+    if "quora" in host:
+        return "quora"
     return host or "rss"
 
 
@@ -181,7 +188,7 @@ def scrape_new_articles(limit: int = 0, fetch_full_content: bool = False) -> dic
     
     # Use environment variables for MongoDB connection
     mongodb_uri = os.getenv("MONGODB_URI")
-    mongodb_db = os.getenv("MONGODB_DB", "megallm")
+    mongodb_db = os.getenv("MONGODB_DB", "megallm_blog_platform")
     
     client = MongoClient(mongodb_uri)
     db = client[mongodb_db]
