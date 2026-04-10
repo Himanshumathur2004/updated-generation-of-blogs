@@ -17,7 +17,7 @@
         .card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
         .stat-number { font-size: 36px; font-weight: 700; color: #667eea; margin: 12px 0; }
         .controls { background: white; padding: 24px; border-radius: 12px; margin-bottom: 30px; display: flex; gap: 12px; flex-wrap: wrap; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        .btn { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s; }
+        .btn { padding: 8px 14px; font-size: 13px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s; }
         .btn-primary { background: #667eea; color: white; }
         .btn-primary:hover { background: #5568d3; }
         .btn-secondary { background: #f0f0f0; color: #333; border: 2px solid #ddd; }
@@ -90,13 +90,14 @@
         </div>
 
         <div class="controls">
-            <button id="bloggerGenerateBtn" class="btn btn-primary" onclick="generateBloggerPost()">📝 Generate Blogger Post</button>
-            <button id="quoraGenerateBtn" class="btn btn-primary" onclick="generateQuoraPost()">❓ Generate Quora Post</button>
-            <button id="mediumGenerateBtn" class="btn btn-primary" onclick="generateMediumPost()">📰 Generate Medium Post</button>
-            <button id="devtoGenerateBtn" class="btn btn-primary" onclick="generateDevtoPost()">💻 Generate Dev.to Post</button>
-            <button id="tumblrGenerateBtn" class="btn btn-primary" onclick="generateTumblrPost()">🌀 Generate Tumblr Post</button>
+            <button id="bloggerGenerateBtn" class="btn btn-primary" onclick="generateBloggerPost()">📝 Blogger</button>
+            <button id="agiGenerateBtn" class="btn btn-primary" onclick="generateAGIorBustPost()">🤖 AGIorBust</button>
+            <button id="quoraGenerateBtn" class="btn btn-primary" onclick="generateQuoraPost()">❓ Quora</button>
+            <button id="mediumGenerateBtn" class="btn btn-primary" onclick="generateMediumPost()">📰 Medium</button>
+            <button id="devtoGenerateBtn" class="btn btn-primary" onclick="generateDevtoPost()">💻 Dev.to</button>
+            <button id="tumblrGenerateBtn" class="btn btn-primary" onclick="generateTumblrPost()">🌀 Tumblr</button>
             <button class="btn btn-secondary" onclick="refreshDashboard()">🔄 Refresh</button>
-            <button class="btn btn-secondary" onclick="showClearModal()">🗑️ Clear Blogs</button>
+            <button class="btn btn-secondary" onclick="showClearModal()">🗑️ Clear</button>
         </div>
 
         <div class="blogs-container">
@@ -180,6 +181,7 @@
         const DEVTO_ACCOUNT_ID = 'account_6';
         const TUMBLR_ACCOUNT_ID = 'account_7';
         const BLOGGER_ACCOUNT_ID = 'account_1';
+        const AGIBUST_ACCOUNT_ID = 'account_3';
         let currentAccount = null;
         let currentFilter = 'all';
         let blogs = [];
@@ -493,7 +495,7 @@
                 showToast('Error generating Medium post', 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = '📰 Generate Medium Post';
+                btn.textContent = '📰 Medium';
             }
         }
 
@@ -528,7 +530,7 @@
                 showToast('Error generating Quora post', 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = '❓ Generate Quora Post';
+                btn.textContent = '❓ Quora';
             }
         }
 
@@ -563,7 +565,7 @@
                 showToast('Error generating Dev.to post', 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = '💻 Generate Dev.to Post';
+                btn.textContent = '💻 Dev.to';
             }
         }
 
@@ -598,7 +600,40 @@
                 showToast('Error generating Blogger post', 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = '📝 Generate Blogger Post';
+                btn.textContent = '📝 Blogger';
+            }
+        }
+
+        async function generateAGIorBustPost() {
+            const btn = document.getElementById('agiGenerateBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating...';
+
+            try {
+                const response = await fetch(`${API_BASE}/blogs/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_id: AGIBUST_ACCOUNT_ID,
+                        topics: { performance: 1 }
+                    })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    const agiBtn = document.querySelector(`.account-btn[data-account-id="${AGIBUST_ACCOUNT_ID}"]`);
+                    if (agiBtn) selectAccount(AGIBUST_ACCOUNT_ID, agiBtn);
+                    await refreshDashboard();
+                    showToast(`✅ Generated ${data.generated_count || 1} AGIorBust post`, 'success');
+                } else {
+                    showToast(`⚠️ ${data.error || 'AGIorBust generation failed'}`, 'error');
+                }
+            } catch (err) {
+                console.error('Error generating AGIorBust post:', err);
+                showToast('Error generating AGIorBust post', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🤖 AGIorBust';
             }
         }
 
@@ -633,7 +668,7 @@
                 showToast('Error generating Tumblr post', 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = '🌀 Generate Tumblr Post';
+                btn.textContent = '🌀 Tumblr';
             }
         }
 
