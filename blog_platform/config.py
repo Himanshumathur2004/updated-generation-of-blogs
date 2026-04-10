@@ -30,6 +30,12 @@ class Config:
     MODEL = os.getenv("MODEL", "claude-opus-4-6")
     MEGALLM_BACKLINK_URL = os.getenv("MEGALLM_BACKLINK_URL", "https://beta.megallm.io")
 
+    # Dev.to account configuration (only this account generates dev.to-ready posts)
+    DEVTO_ACCOUNT_ID = os.getenv("DEVTO_ACCOUNT_ID", "account_6")
+    DEVTO_AUTHOR_NAME = os.getenv("DEVTO_AUTHOR_NAME", "MegaLLM Editorial Team")
+    DEVTO_AUTHOR_USERNAME = os.getenv("DEVTO_AUTHOR_USERNAME", "megallm")
+    DEVTO_CANONICAL_BASE_URL = os.getenv("DEVTO_CANONICAL_BASE_URL", "https://dev.to/megallm")
+
     # Medium account configuration (only this account generates Medium-ready posts)
     MEDIUM_ACCOUNT_ID = os.getenv("MEDIUM_ACCOUNT_ID", "account_5")
     MEDIUM_PUBLICATION_SLUG = os.getenv("MEDIUM_PUBLICATION_SLUG", "")
@@ -124,5 +130,11 @@ class Config:
             "name": "TokensAndTakes",
             "description": "Medium-only publishing account",
             "medium_only": True,
+        },
+        {
+            "id": "account_6",
+            "name": "DevPulseAI",
+            "description": "Dev.to publishing account — developer-first content",
+            "devto_only": True,
         },
     ]
