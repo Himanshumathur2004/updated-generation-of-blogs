@@ -428,6 +428,18 @@ class BlogGenerator:
     - Avoid robotic phrasing, generic filler, and repetitive cadence
     - Keep the writing sharp, opinionated, and publication-ready
     - Return ONLY valid JSON with keys: title, body
+
+    OPENING SENTENCE — THIS IS CRITICAL:
+    - NEVER start with "For product", "For engineering", "For teams", "For developers", "For CTOs"
+    - NEVER start with "When it comes to", "In today's", "The [noun] you choose", "Every [team/company]"
+    - NEVER start with a passive observation or obvious setup sentence
+    - Each post MUST open differently. Pick ONE of these styles and commit to it fully:
+      * Drop straight into a specific failure story: "We had 40% of our inference budget gone by Tuesday."
+      * Open with a hard number that surprises: "Three seconds. That's the latency gap that costs a SaaS product its trial conversion."
+      * Challenge the obvious assumption: "Everyone benchmarks models. Almost nobody benchmarks their harness."
+      * Start mid-thought, as if continuing a conversation: "Here's the thing nobody says out loud about LLM cost at scale —"
+      * Open with a sharp verdict: "The routing layer is where most LLM cost problems actually live. Not the model."
+      * Use a vivid before/after contrast: "Before: $0.80 per 1,000 calls. After one config change: $0.18."
     """
 
         user_prompt = f"""Humanize this draft:
@@ -453,7 +465,7 @@ Return JSON:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.75,
+            "temperature": 0.9,
             "max_tokens": 3200,
         }
 
