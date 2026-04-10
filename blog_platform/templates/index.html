@@ -92,6 +92,7 @@
         <div class="controls">
             <button id="mediumGenerateBtn" class="btn btn-primary" onclick="generateMediumPost()">📰 Generate Medium Post</button>
             <button id="quoraGenerateBtn" class="btn btn-primary" onclick="generateQuoraPost()">❓ Generate Quora Post</button>
+            <button id="devtoGenerateBtn" class="btn btn-primary" onclick="generateDevtoPost()">💻 Generate Dev.to Post</button>
             <button class="btn btn-primary" onclick="bulkGenerateAll()">⚡ Bulk Generate (All Accounts)</button>
             <button class="btn btn-secondary" onclick="refreshDashboard()">🔄 Refresh</button>
             <button class="btn btn-secondary" onclick="showClearModal()">🗑️ Clear Blogs</button>
@@ -148,6 +149,7 @@
         const API_BASE = '/api';
         const MEDIUM_ACCOUNT_ID = 'account_5';
         const QUORA_ACCOUNT_ID = 'account_4';
+        const DEVTO_ACCOUNT_ID = 'account_6';
         let currentAccount = null;
         let currentFilter = 'all';
         let blogs = [];
@@ -402,6 +404,41 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = '❓ Generate Quora Post';
+            }
+        }
+
+        async function generateDevtoPost() {
+            const btn = document.getElementById('devtoGenerateBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating Dev.to Post...';
+
+            try {
+                const response = await fetch(`${API_BASE}/blogs/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_id: DEVTO_ACCOUNT_ID,
+                        topics: { performance: 1 }
+                    })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    const devtoBtn = document.querySelector(`.account-btn[data-account-id="${DEVTO_ACCOUNT_ID}"]`);
+                    if (devtoBtn) {
+                        selectAccount(DEVTO_ACCOUNT_ID, devtoBtn);
+                    }
+                    await refreshDashboard();
+                    showToast(`✅ Generated ${data.generated_count || 1} Dev.to post`, 'success');
+                } else {
+                    showToast(`⚠️ ${data.error || 'Dev.to generation failed'}`, 'error');
+                }
+            } catch (err) {
+                console.error('Error generating Dev.to post:', err);
+                showToast('Error generating Dev.to post', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '💻 Generate Dev.to Post';
             }
         }
 

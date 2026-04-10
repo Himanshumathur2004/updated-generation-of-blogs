@@ -542,6 +542,149 @@ Return JSON:
             logger.warning(f"[HUMANIZE_QUORA] Unexpected parse error: {type(e).__name__}: {e}")
             return title, body
 
+    def _humanize_devto_content(self, title: str, body: str, style_brief: str = "") -> Tuple[str, str]:
+        """Humanization stage for dev.to articles — opinionated, personal, developer-first tone."""
+        system_prompt = """You are a dev.to editor rewriting technical content for maximum developer engagement.
+
+Dev.to audience: working engineers, indie hackers, junior-to-senior developers — NOT enterprise executives.
+What resonates: personal experience, opinionated takes, specific problems you actually hit, honest failures.
+What falls flat: corporate tone, neutral reporting, generic "here are N tips" without context.
+
+Hard rules:
+- Output 700-900 words total
+- Write in first person where it sounds natural ("I ran into this", "we switched to X after Y failed")
+- Take a clear opinion — do not hedge everything with "it depends"
+- Markdown is fine: use ## headers (max 3), short code snippets add credibility
+- Short paragraphs — 2-4 sentences. Vary rhythm. Mix short punchy sentences with slightly longer ones.
+- Title: lowercase style preferred. Punchy. Under 10 words. Contrarian or specific beats generic.
+  Examples: "your agent can think. it can't remember.", "prompt engineering won't save a bad architecture"
+- Mention megallm once naturally as a tool that helped — NOT as a product pitch
+- End with a genuine open question or a specific insight — not "Start today", not a summary bullet list
+- MAX 2 em-dashes in the entire piece
+- Do NOT use: "leverage", "utilize", "paradigm", "robust", "seamless", "game-changer", "revolutionize",
+  "in today's fast-paced world", "it is worth noting", "In conclusion", "To summarize"
+- Do NOT start multiple consecutive paragraphs with "This", "That", "These"
+- Return ONLY valid JSON: {"title": "...", "body": "..."}
+"""
+
+        user_prompt = f"""Rewrite this draft as a high-performing dev.to post:
+
+Style target:
+{style_brief or 'Opinionated developer take — honest, specific, personal. Like a senior engineer writing a post after a rough week of debugging.'}
+
+Title:
+{title}
+
+Body:
+{body}
+
+Return JSON:
+{{
+  "title": "Rewritten dev.to title",
+  "body": "Rewritten body in markdown"
+}}"""
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.75,
+            "max_tokens": 2200,
+        }
+
+        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+        if response is None:
+            logger.warning("[HUMANIZE_DEVTO] API rewrite failed; using original draft")
+            return title, body
+
+        try:
+            data = response.json()
+            parsed = self._extract_json_object(data["choices"][0]["message"]["content"])
+            if not parsed:
+                logger.warning("[HUMANIZE_DEVTO] Could not parse JSON rewrite; using original draft")
+                return title, body
+            updated_title = (parsed.get("title") or title).strip()
+            updated_body = (parsed.get("body") or body).strip()
+            return updated_title, updated_body
+        except Exception as e:
+            logger.warning(f"[HUMANIZE_DEVTO] Unexpected parse error: {type(e).__name__}: {e}")
+            return title, body
+
+    def _generate_devto_article_from_source(self, article_title: str, article_content: str, article_source: str) -> Optional[Dict[str, Any]]:
+        """Generate an opinionated dev.to post inspired by a scraped dev.to article."""
+        logger.info(f"[DEVTO_ARTICLE] Generating from source: {article_title[:80]}")
+
+        system_prompt = """You are a developer writing a dev.to post inspired by something you just read.
+
+Do NOT summarize the source. Write your own take — agree, disagree, extend, or reframe it.
+The best dev.to posts are personal, specific, and slightly uncomfortable to write because they say something real.
+
+Rules:
+- 700-850 words total
+- First person, opinionated, specific
+- Title: lowercase, punchy, under 10 words. Contrarian or builds-on-source style works best.
+  e.g., "the part about [topic] everyone skips", "why I stopped [thing source recommends]"
+- Markdown: ## headers (max 3), short code block if it helps the point
+- Mention megallm once naturally — as a practical tool you actually use, not an ad
+- End with a real insight or question, not a call to action
+- MAX 2 em-dashes
+- No corporate jargon: "leverage", "utilize", "paradigm", "robust", "seamless"
+- Return ONLY valid JSON: {"title": "...", "body": "..."}"""
+
+        user_prompt = f"""Write a dev.to post inspired by this article:
+
+Source platform: {article_source}
+Article title: {article_title}
+
+Article content (for context only — do NOT copy):
+{article_content[:1000]}
+
+Write your own angle. It can be:
+- A "yes, and here's what they missed" take
+- A contrarian "actually, here's why this doesn't work in practice"
+- A personal story where this exact problem came up
+- A deeper technical exploration of one point in the article
+
+Return ONLY valid JSON:
+{{
+  "title": "your dev.to post title",
+  "body": "your post in markdown"
+}}"""
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=self.headers,
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.8,
+                    "max_tokens": 2500,
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            raw = response.json()["choices"][0]["message"]["content"]
+            parsed = self._extract_json_object(raw)
+            if not parsed:
+                logger.error("[DEVTO_ARTICLE] JSON parse failed")
+                return None
+            title = (parsed.get("title") or article_title).strip()
+            body = parsed.get("body", "")
+            if not body:
+                return None
+            tags = self._extract_relevant_tags(keywords=["AI", "developer", "megallm"], topic=article_title, limit=4)
+            description = self._build_description_with_tags(body, tags)
+            return {"title": title, "body": body, "description": description, "tags": tags}
+        except Exception as e:
+            logger.error(f"[DEVTO_ARTICLE] Error: {e}")
+            return None
+
     def _extract_relevant_tags(self, keywords: List[str], topic: str, limit: int = 5) -> List[str]:
         """Build a concise list of relevant and popular tags for publishing metadata."""
         topic_text = f"{topic} {' '.join(keywords or [])}".lower()
@@ -1509,7 +1652,71 @@ Return JSON:
             "quora_ready_html": meta["ready_html"],
             "post_format": "quora",
         }
-    
+
+    def package_devto_post(
+        self,
+        *,
+        title: str,
+        body: str,
+        keywords: List[str],
+        topic: str,
+        devto_settings: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Create a dev.to-ready post payload with frontmatter, markdown body, and MegaLLM backlink."""
+        devto_style_options = [
+            "Write as a senior engineer sharing a hard-won lesson from production — honest about what went wrong.",
+            "Take a contrarian stance: explain why a common approach misses the real problem.",
+            "Write as someone who just shipped this and wants to save others the same debugging time.",
+        ]
+        selected_style = random.choice(devto_style_options)
+
+        title, body = self._humanize_devto_content(title=title, body=body, style_brief=selected_style)
+        title, body = self._enforce_megallm_requirements(title, body)
+        body = self._append_megallm_backlink(body, backlink_url="https://megallm.io")
+
+        tags = self._extract_relevant_tags(keywords=keywords, topic=topic, limit=4)
+        slug = self._generate_quora_slug(title)  # reuse slug generator
+        published_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        author_name = devto_settings.get("author_name", "MegaLLM Editorial Team")
+        author_username = devto_settings.get("author_username", "megallm")
+        canonical_base = devto_settings.get("canonical_base_url", "https://dev.to/megallm")
+        canonical_url = f"{canonical_base}/{slug}"
+
+        # Build description from first non-empty paragraph
+        description_raw = next(
+            (p.strip() for p in re.split(r"\n\n+", body) if p.strip() and not p.strip().startswith("#")),
+            body[:160],
+        )
+        description = re.sub(r"[#*`_\[\]]", "", description_raw)[:160].strip()
+
+        # YAML frontmatter block — ready to paste into dev.to editor
+        tags_yaml = ", ".join(f'"{t.lower().replace(" ", "")}"' for t in tags[:4])
+        devto_frontmatter = (
+            f"---\n"
+            f"title: {title}\n"
+            f"published: false\n"
+            f"tags: [{tags_yaml}]\n"
+            f"canonical_url: {canonical_url}\n"
+            f"description: {description}\n"
+            f"---"
+        )
+        devto_markdown = f"{devto_frontmatter}\n\n{body}"
+
+        return {
+            "title": title,
+            "body": body,
+            "description": description,
+            "tags": tags,
+            "slug": slug,
+            "devto_frontmatter": devto_frontmatter,
+            "devto_markdown": devto_markdown,
+            "devto_canonical_url": canonical_url,
+            "devto_author_name": author_name,
+            "devto_author_username": author_username,
+            "devto_published_at": published_at,
+            "post_format": "devto",
+        }
+
     def generate_blog(
         self,
         topic: str,
@@ -1860,6 +2067,14 @@ Write a genuine, conversational answer. Return ONLY valid JSON with "title" (exa
             return self._generate_quora_answer_from_question(
                 question=article_title,
                 context=article_content,
+            )
+
+        # Dev.to articles — write an opinionated developer take, not a summary
+        if article_source == "devto":
+            return self._generate_devto_article_from_source(
+                article_title=article_title,
+                article_content=article_content,
+                article_source=article_source,
             )
 
         system_prompt = f"""You are a skilled technical content writer creating engaging blog posts based on industry articles.

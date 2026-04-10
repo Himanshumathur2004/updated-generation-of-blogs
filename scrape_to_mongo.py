@@ -28,6 +28,10 @@ FEEDS = [
     "https://www.quora.com/topic/Artificial-Intelligence/rss",
     "https://www.quora.com/topic/OpenAI/rss",
     "https://www.quora.com/topic/Machine-Learning/rss",
+    # Dev.to trending articles — what developers are reading and discussing
+    "https://dev.to/feed/tag/ai",
+    "https://dev.to/feed/tag/llm",
+    "https://dev.to/feed/tag/machinelearning",
 ]
 
 
@@ -114,6 +118,8 @@ def _source_from_url(url: str) -> str:
         return "hn"
     if "quora" in host:
         return "quora"
+    if "dev.to" in host:
+        return "devto"
     return host or "rss"
 
 

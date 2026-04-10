@@ -97,6 +97,16 @@ def get_medium_settings() -> dict:
     }
 
 
+def get_devto_settings() -> dict:
+    """Return dev.to metadata defaults for the dedicated dev.to account."""
+    return {
+        "author_name": getattr(Config, "DEVTO_AUTHOR_NAME", "MegaLLM Editorial Team"),
+        "author_username": getattr(Config, "DEVTO_AUTHOR_USERNAME", "megallm"),
+        "canonical_base_url": getattr(Config, "DEVTO_CANONICAL_BASE_URL", "https://dev.to/megallm"),
+        "backlink_url": getattr(Config, "MEGALLM_BACKLINK_URL", "https://beta.megallm.io"),
+    }
+
+
 def get_quora_settings() -> dict:
     """Return Quora metadata defaults for the dedicated Quora account."""
     return {
@@ -282,10 +292,11 @@ def generate_blogs():
     
     generated_count = 0
     error = None
+    devto_account_id = getattr(Config, "DEVTO_ACCOUNT_ID", "account_6")
 
-    # For Quora/Medium accounts: scrape fresh articles first, use them as content source
+    # For Quora/Medium/Dev.to accounts: scrape fresh articles first, use them as content source
     articles_pool = []
-    if account_id in {Config.QUORA_ACCOUNT_ID, Config.MEDIUM_ACCOUNT_ID} and not db.is_memory:
+    if account_id in {Config.QUORA_ACCOUNT_ID, Config.MEDIUM_ACCOUNT_ID, devto_account_id} and not db.is_memory:
         try:
             from scrape_to_mongo import scrape_new_articles
             total_needed = sum(topics_to_generate.values())
@@ -341,6 +352,14 @@ def generate_blogs():
                             topic=topic_info["name"],
                             quora_settings=get_quora_settings(),
                         )
+                    elif account_id == devto_account_id:
+                        blog_data = blog_generator.package_devto_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=topic_info["keywords"],
+                            topic=topic_info["name"],
+                            devto_settings=get_devto_settings(),
+                        )
                     blog_data["account_id"] = account_id
                     blog_data["topic"] = topic_id
                     db.insert_blog(blog_data)
@@ -350,7 +369,7 @@ def generate_blogs():
         
     except Exception as e:
         error = str(e)
-        logger.error(f"Generation error: {error}")
+        logger.exception(f"Generation error: {error}")
     
     # Log generation event
     db.log_generation(account_id, generated_count, error)
@@ -385,6 +404,7 @@ def generate_blogs_from_articles():
     
     generated_count = 0
     error = None
+    devto_account_id = getattr(Config, "DEVTO_ACCOUNT_ID", "account_6")
     
     try:
         # Get pending articles from MongoDB
@@ -423,6 +443,14 @@ def generate_blogs_from_articles():
                             keywords=blog_data.get("tags", [article.get("source", "AI")]),
                             topic=article_topic,
                             quora_settings=get_quora_settings(),
+                        )
+                    elif account_id == devto_account_id:
+                        blog_data = blog_generator.package_devto_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=blog_data.get("tags", [article.get("source", "AI")]),
+                            topic=article_topic,
+                            devto_settings=get_devto_settings(),
                         )
                     blog_data["account_id"] = account_id
                     blog_data["source_type"] = "scraped_article"
