@@ -228,7 +228,12 @@ def scrape_new_articles(limit: int = 0, fetch_full_content: bool = False) -> dic
             skipped += 1
             continue
 
-        exists = articles.find_one({"$or": [{"guid": dedup_key}, {"link": doc.get("link")}]}, {"_id": 1})
+        # Deduplicate by guid/link AND by title to catch cross-feed duplicates
+        title = doc.get("title") or ""
+        query = {"$or": [{"guid": dedup_key}, {"link": doc.get("link")}]}
+        if title:
+            query["$or"].append({"title": title})
+        exists = articles.find_one(query, {"_id": 1})
         if exists:
             skipped += 1
             continue

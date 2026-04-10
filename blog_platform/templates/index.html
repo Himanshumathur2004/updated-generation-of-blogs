@@ -55,7 +55,7 @@
         .copy-row { display: flex; gap: 15px; align-items: flex-start; }
         .copy-box { flex: 1; background: #f8f8f8; padding: 16px; border-radius: 8px; border: 1px solid #ddd; }
         .copy-box.title { font-weight: 700; font-size: 18px; min-height: 40px; padding: 12px 16px; display: flex; align-items: center; }
-        .copy-box.body { min-height: 220px; max-height: 350px; overflow-y: auto; font-size: 14px; line-height: 1.6; color: #444; }
+        .copy-box.body { min-height: 220px; max-height: 350px; overflow-y: auto; font-size: 14px; line-height: 1.6; color: #444; white-space: pre-wrap; word-break: break-word; }
         .btn-copy-modal { padding: 10px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; }
         .btn-copy-modal:hover { background: #059669; }
         
@@ -93,7 +93,8 @@
             <button id="mediumGenerateBtn" class="btn btn-primary" onclick="generateMediumPost()">📰 Generate Medium Post</button>
             <button id="quoraGenerateBtn" class="btn btn-primary" onclick="generateQuoraPost()">❓ Generate Quora Post</button>
             <button id="devtoGenerateBtn" class="btn btn-primary" onclick="generateDevtoPost()">💻 Generate Dev.to Post</button>
-            <button class="btn btn-primary" onclick="bulkGenerateAll()">⚡ Bulk Generate (All Accounts)</button>
+            <button id="tumblrGenerateBtn" class="btn btn-primary" onclick="generateTumblrPost()">🌀 Generate Tumblr Post</button>
+            <button id="bloggerGenerateBtn" class="btn btn-primary" onclick="generateBloggerPost()">📝 Generate Blogger Post</button>
             <button class="btn btn-secondary" onclick="refreshDashboard()">🔄 Refresh</button>
             <button class="btn btn-secondary" onclick="showClearModal()">🗑️ Clear Blogs</button>
         </div>
@@ -128,17 +129,44 @@
             </div>
             
             <div class="copy-section">
-                <h3>📝 Description</h3>
+                <h3 id="modalBodyLabel">📝 Description</h3>
                 <div class="copy-row">
                     <div class="copy-box body" id="modalBody"></div>
                     <button class="btn-copy-modal" onclick="copyBody()">📋 Copy</button>
                 </div>
             </div>
 
+            <!-- Dev.to frontmatter copy — only shown for dev.to posts -->
+            <div class="copy-section" id="devtoFrontmatterSection" style="display:none;">
+                <h3>⚙️ Dev.to Frontmatter (advanced editor only)</h3>
+                <div class="copy-row">
+                    <div class="copy-box" style="min-height: 44px; font-size: 13px; display: flex; align-items: center; color: #666;">Paste into dev.to's advanced editor (with the --- block).</div>
+                    <button class="btn-copy-modal" onclick="copyFullMarkdown()">📋 Copy with Frontmatter</button>
+                </div>
+            </div>
+
+            <!-- Tumblr HTML copy — only shown for Tumblr posts -->
+            <div class="copy-section" id="tumblrHtmlSection" style="display:none;">
+                <h3>🌀 Tumblr HTML (dashboard HTML mode)</h3>
+                <div class="copy-row">
+                    <div class="copy-box" style="min-height: 44px; font-size: 13px; display: flex; align-items: center; color: #666;">Paste into Tumblr's HTML editor for rich formatting.</div>
+                    <button class="btn-copy-modal" onclick="copyTumblrHtml()">📋 Copy HTML</button>
+                </div>
+            </div>
+
+            <!-- Blogger HTML copy — only shown for Blogger posts -->
+            <div class="copy-section" id="bloggerHtmlSection" style="display:none;">
+                <h3>📝 Blogger HTML (post editor HTML mode)</h3>
+                <div class="copy-row">
+                    <div class="copy-box" style="min-height: 44px; font-size: 13px; display: flex; align-items: center; color: #666;">Paste into Blogger's HTML editor for full formatting.</div>
+                    <button class="btn-copy-modal" onclick="copyBloggerHtml()">📋 Copy HTML</button>
+                </div>
+            </div>
+
             <div class="copy-section" style="margin-bottom: 0;">
                 <h3>🚀 Quick Copy</h3>
                 <div class="copy-row">
-                    <div class="copy-box" style="min-height: 44px; display: flex; align-items: center;">Copy title and description together for one-step paste.</div>
+                    <div class="copy-box" style="min-height: 44px; display: flex; align-items: center;">Copy title and body together for one-step paste.</div>
                     <button class="btn-copy-modal" onclick="copyFullPost()">📋 Copy Full Post</button>
                 </div>
             </div>
@@ -150,10 +178,13 @@
         const MEDIUM_ACCOUNT_ID = 'account_5';
         const QUORA_ACCOUNT_ID = 'account_4';
         const DEVTO_ACCOUNT_ID = 'account_6';
+        const TUMBLR_ACCOUNT_ID = 'account_7';
+        const BLOGGER_ACCOUNT_ID = 'account_1';
         let currentAccount = null;
         let currentFilter = 'all';
         let blogs = [];
         let currentBlogToCopy = null;
+        let blogDataMap = {}; // maps blog._id → blog object, avoids HTML attribute encoding issues
 
         document.addEventListener('DOMContentLoaded', async () => {
             await loadAccounts();
@@ -190,32 +221,44 @@
             document.querySelectorAll('.account-btn').forEach(btn => btn.classList.remove('active'));
             element.classList.add('active');
             blogs = [];
+            document.getElementById('blogsList').innerHTML = '<div class="empty-state">⏳ Loading...</div>';
             refreshDashboard();
         }
 
         async function refreshDashboard() {
             if (!currentAccount) return;
+            // Capture the account at call time — prevents race condition when user
+            // switches accounts quickly before a previous fetch completes
+            const accountAtStart = currentAccount;
             try {
-                const response = await fetch(`${API_BASE}/dashboard/${currentAccount}`);
+                const response = await fetch(`${API_BASE}/dashboard/${accountAtStart}`);
                 const data = await response.json();
-                document.getElementById('totalBlogs').textContent = data.total_blogs || 0;
-                document.getElementById('draftCount').textContent = data.status_breakdown?.draft || 0;
-                document.getElementById('postedCount').textContent = data.status_breakdown?.posted || 0;
+                // Discard if user switched to a different account while we were fetching
+                if (currentAccount !== accountAtStart) return;
+                // Use status_breakdown counts for accuracy (blog_count on account can be stale)
+                const draft = data.status_breakdown?.draft || 0;
+                const posted = data.status_breakdown?.posted || 0;
+                document.getElementById('totalBlogs').textContent = draft + posted;
+                document.getElementById('draftCount').textContent = draft;
+                document.getElementById('postedCount').textContent = posted;
                 const topicHtml = Object.entries(data.blogs_by_topic || {})
                     .map(([topic, count]) => `<div>• ${topic}: <strong>${count}</strong></div>`)
                     .join('');
                 document.getElementById('blogsByTopic').innerHTML = topicHtml || '<div>No blogs yet</div>';
-                await loadBlogs();
+                await loadBlogs(accountAtStart);
             } catch (err) {
                 console.error('Error refreshing dashboard:', err);
             }
         }
 
-        async function loadBlogs() {
-            if (!currentAccount) return;
+        async function loadBlogs(forAccount) {
+            const accountId = forAccount || currentAccount;
+            if (!accountId) return;
             try {
-                const response = await fetch(`${API_BASE}/blogs?account_id=${currentAccount}`);
+                const response = await fetch(`${API_BASE}/blogs?account_id=${accountId}`);
                 const data = await response.json();
+                // Discard stale response if user already switched away
+                if (currentAccount !== accountId) return;
                 blogs = data.blogs || [];
                 renderBlogs();
             } catch (err) {
@@ -240,39 +283,91 @@
                 blogsList.innerHTML = '<div class="empty-state">📭 No blogs yet. Generate some to get started!</div>';
                 return;
             }
-            blogsList.innerHTML = filtered.map((blog, idx) => `
+            blogDataMap = {};
+            blogsList.innerHTML = filtered.map((blog, idx) => {
+                // Store full blog data in JS map — avoids HTML attribute encoding issues with quotes/newlines
+                blogDataMap[blog._id] = blog;
+                // Strip markdown heading syntax from preview so ## doesn't show literally
+                const previewText = (blog.body || '').replace(/^#+\s+/gm, '').trim().substring(0, 100);
+                return `
                 <div class="blog-item">
                     <div class="blog-title">${escapeHtml(blog.title)}</div>
-                    <div class="blog-preview">${escapeHtml((blog.body || '').substring(0, 100) + '...')}</div>
+                    <div class="blog-preview">${escapeHtml(previewText + '...')}</div>
                     <div class="blog-meta">
                         <span>📅 ${new Date(blog.created_at).toLocaleDateString()}</span>
                         <span class="blog-status ${blog.status}">${blog.status}</span>
                     </div>
                     <div class="blog-actions">
-                        <button class="btn-copy" data-blog-idx="${idx}" data-title="${escapeHtml(blog.title)}" data-body="${escapeHtml(blog.body || '')}">📋 Copy Blog</button>
+                        <button class="btn-copy" data-blog-id="${blog._id}">📋 Copy Blog</button>
                         <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="markPosted('${blog._id}')">✓ Mark Posted</button>
                     </div>
                 </div>
-            `).join('');
-            
-            // Add event listeners to copy buttons
+                `;
+            }).join('');
+
+            // Add event listeners to copy buttons — look up data from blogDataMap, not HTML attributes
             document.querySelectorAll('.btn-copy').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    const title = btn.getAttribute('data-title');
-                    const body = btn.getAttribute('data-body');
-                    const unescapedTitle = unescapeHtml(title);
-                    const unescapedBody = unescapeHtml(body);
-                    showCopyModal(unescapedTitle, unescapedBody);
+                    const blogId = btn.getAttribute('data-blog-id');
+                    const blog = blogDataMap[blogId];
+                    if (!blog) return;
+                    const title = blog.title || '';
+                    // For dev.to: pass devto_markdown; for Tumblr: pass body + tumblr_html; others: body
+                    const body = blog.post_format === 'devto'
+                        ? (blog.devto_markdown || blog.body || '')
+                        : (blog.body || '');
+                    const format = blog.post_format || '';
+                    const extra = blog.post_format === 'tumblr'
+                        ? { tumblrHtml: blog.tumblr_html || '' }
+                        : blog.post_format === 'blogger'
+                        ? { bloggerHtml: blog.blogger_html || '' }
+                        : {};
+                    showCopyModal(title, body, format, extra);
                 });
             });
         }
 
-        function showCopyModal(title, body) {
-            const unescapedTitle = unescapeHtml(title);
-            const unescapedBody = unescapeHtml(body);
-            document.getElementById('modalTitle').textContent = unescapedTitle;
-            document.getElementById('modalBody').textContent = unescapedBody;
-            currentBlogToCopy = { title: unescapedTitle, body: unescapedBody };
+        function showCopyModal(title, body, format, extra) {
+            extra = extra || {};
+            document.getElementById('modalTitle').textContent = title;
+            const bodyEl = document.getElementById('modalBody');
+            const labelEl = document.getElementById('modalBodyLabel');
+            const frontmatterSection = document.getElementById('devtoFrontmatterSection');
+            const tumblrSection = document.getElementById('tumblrHtmlSection');
+            const bloggerSection = document.getElementById('bloggerHtmlSection');
+
+            // Hide platform-specific sections by default
+            frontmatterSection.style.display = 'none';
+            tumblrSection.style.display = 'none';
+            bloggerSection.style.display = 'none';
+
+            if (format === 'devto') {
+                const rawBody = body.replace(/^---[\s\S]*?---\n?\n?/, '');
+                labelEl.textContent = '💻 Article Preview';
+                bodyEl.style.whiteSpace = 'normal';
+                bodyEl.innerHTML = renderMarkdownPreview(body);
+                frontmatterSection.style.display = '';
+                currentBlogToCopy = { title, body: rawBody, fullMarkdown: body, tumblrHtml: null, bloggerHtml: null };
+            } else if (format === 'tumblr') {
+                labelEl.textContent = '🌀 Tumblr Post Preview';
+                bodyEl.style.whiteSpace = 'normal';
+                bodyEl.innerHTML = renderMarkdownPreview(body);
+                tumblrSection.style.display = '';
+                currentBlogToCopy = { title, body, fullMarkdown: null, tumblrHtml: extra.tumblrHtml || '', bloggerHtml: null };
+            } else if (format === 'blogger') {
+                labelEl.textContent = '📝 Blogger Post Preview';
+                bodyEl.style.whiteSpace = 'normal';
+                bodyEl.innerHTML = renderMarkdownPreview(body);
+                bloggerSection.style.display = '';
+                currentBlogToCopy = { title, body, fullMarkdown: null, tumblrHtml: null, bloggerHtml: extra.bloggerHtml || '' };
+            } else {
+                if (format === 'quora') labelEl.textContent = '💬 Answer';
+                else if (format === 'medium') labelEl.textContent = '📰 Article Body';
+                else labelEl.textContent = '📝 Description';
+                bodyEl.style.whiteSpace = 'pre-wrap';
+                bodyEl.textContent = body;
+                currentBlogToCopy = { title, body, fullMarkdown: null, tumblrHtml: null, bloggerHtml: null };
+            }
             document.getElementById('copyModal').classList.add('show');
         }
 
@@ -293,10 +388,40 @@
 
         function copyBody() {
             if (!currentBlogToCopy) return;
-            navigator.clipboard.writeText(currentBlogToCopy.body).then(() => {
-                showToast('✅ Description copied!', 'success');
+            // Copy the visible text from the rendered preview (no markdown syntax)
+            const bodyEl = document.getElementById('modalBody');
+            const text = bodyEl.innerText || bodyEl.textContent || currentBlogToCopy.body;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('✅ Copied!', 'success');
             }).catch(err => {
                 console.error('Failed to copy:', err);
+                showToast('Error copying', 'error');
+            });
+        }
+
+        function copyFullMarkdown() {
+            if (!currentBlogToCopy || !currentBlogToCopy.fullMarkdown) return;
+            navigator.clipboard.writeText(currentBlogToCopy.fullMarkdown).then(() => {
+                showToast('✅ Full markdown with frontmatter copied!', 'success');
+            }).catch(err => {
+                showToast('Error copying', 'error');
+            });
+        }
+
+        function copyTumblrHtml() {
+            if (!currentBlogToCopy || !currentBlogToCopy.tumblrHtml) return;
+            navigator.clipboard.writeText(currentBlogToCopy.tumblrHtml).then(() => {
+                showToast('✅ Tumblr HTML copied!', 'success');
+            }).catch(err => {
+                showToast('Error copying', 'error');
+            });
+        }
+
+        function copyBloggerHtml() {
+            if (!currentBlogToCopy || !currentBlogToCopy.bloggerHtml) return;
+            navigator.clipboard.writeText(currentBlogToCopy.bloggerHtml).then(() => {
+                showToast('✅ Blogger HTML copied!', 'success');
+            }).catch(err => {
                 showToast('Error copying', 'error');
             });
         }
@@ -442,6 +567,76 @@
             }
         }
 
+        async function generateBloggerPost() {
+            const btn = document.getElementById('bloggerGenerateBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating Blogger Post...';
+
+            try {
+                const response = await fetch(`${API_BASE}/blogs/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_id: BLOGGER_ACCOUNT_ID,
+                        topics: { performance: 1 }
+                    })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    const bloggerBtn = document.querySelector(`.account-btn[data-account-id="${BLOGGER_ACCOUNT_ID}"]`);
+                    if (bloggerBtn) {
+                        selectAccount(BLOGGER_ACCOUNT_ID, bloggerBtn);
+                    }
+                    await refreshDashboard();
+                    showToast(`✅ Generated ${data.generated_count || 1} Blogger post`, 'success');
+                } else {
+                    showToast(`⚠️ ${data.error || 'Blogger generation failed'}`, 'error');
+                }
+            } catch (err) {
+                console.error('Error generating Blogger post:', err);
+                showToast('Error generating Blogger post', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📝 Generate Blogger Post';
+            }
+        }
+
+        async function generateTumblrPost() {
+            const btn = document.getElementById('tumblrGenerateBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating Tumblr Post...';
+
+            try {
+                const response = await fetch(`${API_BASE}/blogs/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account_id: TUMBLR_ACCOUNT_ID,
+                        topics: { performance: 1 }
+                    })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    const tumblrBtn = document.querySelector(`.account-btn[data-account-id="${TUMBLR_ACCOUNT_ID}"]`);
+                    if (tumblrBtn) {
+                        selectAccount(TUMBLR_ACCOUNT_ID, tumblrBtn);
+                    }
+                    await refreshDashboard();
+                    showToast(`✅ Generated ${data.generated_count || 1} Tumblr post`, 'success');
+                } else {
+                    showToast(`⚠️ ${data.error || 'Tumblr generation failed'}`, 'error');
+                }
+            } catch (err) {
+                console.error('Error generating Tumblr post:', err);
+                showToast('Error generating Tumblr post', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🌀 Generate Tumblr Post';
+            }
+        }
+
         async function markPosted(blogId) {
             try {
                 const response = await fetch(`${API_BASE}/blogs/${blogId}/mark-posted`, {
@@ -506,6 +701,43 @@
             const div = document.createElement('div');
             div.innerHTML = text;
             return div.textContent;
+        }
+
+        // Minimal markdown → HTML renderer for preview display only (not for copying)
+        function inlineMd(text) {
+            return text
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/`(.+?)`/g, '<code style="background:#f0f0f0;padding:1px 5px;border-radius:3px;font-family:monospace;font-size:0.88em">$1</code>');
+        }
+        function renderMarkdownPreview(md) {
+            // Strip YAML frontmatter block if present
+            const body = md.replace(/^---[\s\S]*?---\n?\n?/, '');
+            const lines = body.split('\n');
+            let html = '';
+            let buf = [];
+            const flushPara = () => {
+                const t = buf.join(' ').trim();
+                if (t) html += `<p style="margin:0 0 10px">${inlineMd(t)}</p>`;
+                buf = [];
+            };
+            for (const line of lines) {
+                const h2 = line.match(/^## (.+)/);
+                const h3 = line.match(/^### (.+)/);
+                if (h2 || h3) {
+                    flushPara();
+                    const tag = h2 ? 'h2' : 'h3';
+                    const sz = h2 ? '1.05em' : '0.95em';
+                    html += `<${tag} style="margin:14px 0 6px;font-size:${sz};font-weight:700">${inlineMd((h2||h3)[1])}</${tag}>`;
+                } else if (line.trim() === '') {
+                    flushPara();
+                } else {
+                    buf.push(line);
+                }
+            }
+            flushPara();
+            return html || '<em>No content</em>';
         }
 
         document.addEventListener('click', (e) => {

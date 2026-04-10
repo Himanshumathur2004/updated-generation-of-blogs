@@ -30,6 +30,18 @@ class Config:
     MODEL = os.getenv("MODEL", "claude-opus-4-6")
     MEGALLM_BACKLINK_URL = os.getenv("MEGALLM_BACKLINK_URL", "https://beta.megallm.io")
 
+    # Blogger account configuration (only this account generates Blogger-ready posts)
+    BLOGGER_ACCOUNT_ID = os.getenv("BLOGGER_ACCOUNT_ID", "account_1")
+    BLOGGER_BLOG_NAME = os.getenv("BLOGGER_BLOG_NAME", "MegaLLM Insights")
+    BLOGGER_AUTHOR_NAME = os.getenv("BLOGGER_AUTHOR_NAME", "MegaLLM Editorial Team")
+    BLOGGER_BASE_URL = os.getenv("BLOGGER_BASE_URL", "https://megallm.blogspot.com")
+
+    # Tumblr account configuration (only this account generates Tumblr-ready posts)
+    TUMBLR_ACCOUNT_ID = os.getenv("TUMBLR_ACCOUNT_ID", "account_7")
+    TUMBLR_BLOG_NAME = os.getenv("TUMBLR_BLOG_NAME", "megallm")
+    TUMBLR_AUTHOR_NAME = os.getenv("TUMBLR_AUTHOR_NAME", "MegaLLM")
+    TUMBLR_BASE_URL = os.getenv("TUMBLR_BASE_URL", "https://megallm.tumblr.com")
+
     # Dev.to account configuration (only this account generates dev.to-ready posts)
     DEVTO_ACCOUNT_ID = os.getenv("DEVTO_ACCOUNT_ID", "account_6")
     DEVTO_AUTHOR_NAME = os.getenv("DEVTO_AUTHOR_NAME", "MegaLLM Editorial Team")
@@ -121,20 +133,25 @@ class Config:
     
     # Accounts (predefined)
     ACCOUNTS = [
-        {"id": "account_1", "name": "ShipAIFast", "description": "Main content account"},
-        {"id": "account_2", "name": "InferenceDaily", "description": "Secondary publication"},
+        {"id": "account_1", "name": "Blogger", "description": "Blogger publishing account — SEO-optimized tech content", "blogger_only": True},
         {"id": "account_3", "name": "AGIorBust", "description": "Backup content"},
-        {"id": "account_4", "name": "TokenAIz", "description": "Regional focus"},
+        {"id": "account_4", "name": "Quora", "description": "Quora publishing account"},
         {
             "id": "account_5",
-            "name": "TokensAndTakes",
-            "description": "Medium-only publishing account",
+            "name": "Medium",
+            "description": "Medium publishing account",
             "medium_only": True,
         },
         {
             "id": "account_6",
-            "name": "DevPulseAI",
+            "name": "Dev.to",
             "description": "Dev.to publishing account — developer-first content",
             "devto_only": True,
+        },
+        {
+            "id": "account_7",
+            "name": "TumblrAI",
+            "description": "Tumblr publishing account — casual, witty AI takes",
+            "tumblr_only": True,
         },
     ]

@@ -64,10 +64,24 @@ if db is None:
 
 # Initialize accounts on startup
 def init_accounts():
-    """Create accounts if they don't exist, or update if names changed."""
+    """Create accounts if they don't exist, update if names changed, delete if removed from config."""
     created = 0
     updated = 0
-    
+    deleted = 0
+
+    config_ids = {account["id"] for account in Config.ACCOUNTS}
+
+    # Remove accounts that are no longer in the config
+    if not db.is_memory:
+        try:
+            all_existing = db.get_all_accounts()
+            for existing in all_existing:
+                if existing.get("account_id") not in config_ids:
+                    db.db.accounts.delete_one({"account_id": existing["account_id"]})
+                    deleted += 1
+        except Exception as e:
+            logger.warning(f"Account cleanup failed: {e}")
+
     for account in Config.ACCOUNTS:
         existing_account = db.get_account(account["id"])
         if existing_account:
@@ -77,9 +91,9 @@ def init_accounts():
         else:
             if db.create_account(account["id"], account["name"], account["description"]):
                 created += 1
-    
-    if created > 0 or updated > 0:
-        logger.info(f"Accounts: {created} created, {updated} updated")
+
+    if created > 0 or updated > 0 or deleted > 0:
+        logger.info(f"Accounts: {created} created, {updated} updated, {deleted} deleted")
 
 init_accounts()
 
@@ -104,6 +118,24 @@ def get_devto_settings() -> dict:
         "author_username": getattr(Config, "DEVTO_AUTHOR_USERNAME", "megallm"),
         "canonical_base_url": getattr(Config, "DEVTO_CANONICAL_BASE_URL", "https://dev.to/megallm"),
         "backlink_url": getattr(Config, "MEGALLM_BACKLINK_URL", "https://beta.megallm.io"),
+    }
+
+
+def get_tumblr_settings() -> dict:
+    """Return Tumblr metadata defaults for the dedicated Tumblr account."""
+    return {
+        "blog_name": getattr(Config, "TUMBLR_BLOG_NAME", "megallm"),
+        "author_name": getattr(Config, "TUMBLR_AUTHOR_NAME", "MegaLLM"),
+        "base_url": getattr(Config, "TUMBLR_BASE_URL", "https://megallm.tumblr.com"),
+    }
+
+
+def get_blogger_settings() -> dict:
+    """Return Blogger metadata defaults for the dedicated Blogger account."""
+    return {
+        "blog_name": getattr(Config, "BLOGGER_BLOG_NAME", "MegaLLM Insights"),
+        "author_name": getattr(Config, "BLOGGER_AUTHOR_NAME", "MegaLLM Editorial Team"),
+        "base_url": getattr(Config, "BLOGGER_BASE_URL", "https://megallm.blogspot.com"),
     }
 
 
@@ -293,17 +325,29 @@ def generate_blogs():
     generated_count = 0
     error = None
     devto_account_id = getattr(Config, "DEVTO_ACCOUNT_ID", "account_6")
+    tumblr_account_id = getattr(Config, "TUMBLR_ACCOUNT_ID", "account_7")
+    blogger_account_id = getattr(Config, "BLOGGER_ACCOUNT_ID", "account_1")
 
-    # For Quora/Medium/Dev.to accounts: scrape fresh articles first, use them as content source
+    # For Quora/Medium/Dev.to/Tumblr/Blogger accounts: scrape fresh articles first, use them as content source
     articles_pool = []
-    if account_id in {Config.QUORA_ACCOUNT_ID, Config.MEDIUM_ACCOUNT_ID, devto_account_id} and not db.is_memory:
+    if account_id in {Config.QUORA_ACCOUNT_ID, Config.MEDIUM_ACCOUNT_ID, devto_account_id, tumblr_account_id, blogger_account_id} and not db.is_memory:
         try:
             from scrape_to_mongo import scrape_new_articles
             total_needed = sum(topics_to_generate.values())
             scrape_result = scrape_new_articles(limit=max(5, total_needed))
             logger.info(f"[SCRAPE] Inserted {scrape_result.get('inserted', 0)} new articles before generation")
-            articles_pool = list(db.db.articles.find({"status": "pending"}).limit(total_needed * 2))
-            logger.info(f"[SCRAPE] {len(articles_pool)} pending articles available for generation")
+            raw_pool = list(db.db.articles.find({"status": "pending"}).sort("isoDate", -1).limit(total_needed * 10))
+            # Deduplicate by title — keep only the first occurrence per title
+            seen_titles = set()
+            articles_pool = []
+            for a in raw_pool:
+                t = (a.get("title") or "").strip()
+                if t and t not in seen_titles:
+                    seen_titles.add(t)
+                    articles_pool.append(a)
+                    if len(articles_pool) >= total_needed * 2:
+                        break
+            logger.info(f"[SCRAPE] {len(articles_pool)} unique pending articles available for generation")
         except Exception as e:
             logger.warning(f"[SCRAPE] Failed, falling back to topic-based generation: {e}")
             articles_pool = []
@@ -360,6 +404,22 @@ def generate_blogs():
                             topic=topic_info["name"],
                             devto_settings=get_devto_settings(),
                         )
+                    elif account_id == tumblr_account_id:
+                        blog_data = blog_generator.package_tumblr_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=topic_info["keywords"],
+                            topic=topic_info["name"],
+                            tumblr_settings=get_tumblr_settings(),
+                        )
+                    elif account_id == blogger_account_id:
+                        blog_data = blog_generator.package_blogger_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=topic_info["keywords"],
+                            topic=topic_info["name"],
+                            blogger_settings=get_blogger_settings(),
+                        )
                     blog_data["account_id"] = account_id
                     blog_data["topic"] = topic_id
                     db.insert_blog(blog_data)
@@ -405,7 +465,9 @@ def generate_blogs_from_articles():
     generated_count = 0
     error = None
     devto_account_id = getattr(Config, "DEVTO_ACCOUNT_ID", "account_6")
-    
+    tumblr_account_id = getattr(Config, "TUMBLR_ACCOUNT_ID", "account_7")
+    blogger_account_id = getattr(Config, "BLOGGER_ACCOUNT_ID", "account_1")
+
     try:
         # Get pending articles from MongoDB
         if db.is_memory:
@@ -451,6 +513,22 @@ def generate_blogs_from_articles():
                             keywords=blog_data.get("tags", [article.get("source", "AI")]),
                             topic=article_topic,
                             devto_settings=get_devto_settings(),
+                        )
+                    elif account_id == tumblr_account_id:
+                        blog_data = blog_generator.package_tumblr_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=blog_data.get("tags", [article.get("source", "AI")]),
+                            topic=article_topic,
+                            tumblr_settings=get_tumblr_settings(),
+                        )
+                    elif account_id == blogger_account_id:
+                        blog_data = blog_generator.package_blogger_post(
+                            title=blog_data.get("title", ""),
+                            body=blog_data.get("body", ""),
+                            keywords=blog_data.get("tags", [article.get("source", "AI")]),
+                            topic=article_topic,
+                            blogger_settings=get_blogger_settings(),
                         )
                     blog_data["account_id"] = account_id
                     blog_data["source_type"] = "scraped_article"

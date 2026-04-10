@@ -551,13 +551,14 @@ What resonates: personal experience, opinionated takes, specific problems you ac
 What falls flat: corporate tone, neutral reporting, generic "here are N tips" without context.
 
 Hard rules:
-- Output 700-900 words total
+- Output 300-400 words total
 - Write in first person where it sounds natural ("I ran into this", "we switched to X after Y failed")
 - Take a clear opinion — do not hedge everything with "it depends"
 - Markdown is fine: use ## headers (max 3), short code snippets add credibility
-- Short paragraphs — 2-4 sentences. Vary rhythm. Mix short punchy sentences with slightly longer ones.
-- Title: lowercase style preferred. Punchy. Under 10 words. Contrarian or specific beats generic.
-  Examples: "your agent can think. it can't remember.", "prompt engineering won't save a bad architecture"
+- Paragraphs: 3-5 sentences each. NEVER write a single sentence as its own paragraph. Group related thoughts together.
+- Capitalization: ALL text uses normal English sentence case — capitalize first word of sentences and proper nouns (MegaLLM, API, etc). ## headings also use sentence case (e.g., "## The fix that actually worked").
+- Title: Title Case — capitalize the main words. Punchy. Under 10 words. Contrarian or specific beats generic.
+  Examples: "Your Agent Can Think. It Can't Remember.", "Prompt Engineering Won't Save a Bad Architecture"
 - Mention megallm once naturally as a tool that helped — NOT as a product pitch
 - End with a genuine open question or a specific insight — not "Start today", not a summary bullet list
 - MAX 2 em-dashes in the entire piece
@@ -622,11 +623,13 @@ Do NOT summarize the source. Write your own take — agree, disagree, extend, or
 The best dev.to posts are personal, specific, and slightly uncomfortable to write because they say something real.
 
 Rules:
-- 700-850 words total
+- 500-600 words total
 - First person, opinionated, specific
-- Title: lowercase, punchy, under 10 words. Contrarian or builds-on-source style works best.
-  e.g., "the part about [topic] everyone skips", "why I stopped [thing source recommends]"
+- Title: Title Case — capitalize the main words. Punchy, under 10 words. Contrarian or builds-on-source style works best.
+  e.g., "The Part About [Topic] Everyone Skips", "Why I Stopped [Thing Source Recommends]"
 - Markdown: ## headers (max 3), short code block if it helps the point
+- Paragraphs: 3-5 sentences each. NEVER write a single sentence as its own standalone paragraph. Group related ideas.
+- Capitalization: ALL text uses normal English sentence case — capitalize first word of sentences and proper nouns. ## headings use sentence case (e.g., "## Why This Breaks in Production").
 - Mention megallm once naturally — as a practical tool you actually use, not an ad
 - End with a real insight or question, not a call to action
 - MAX 2 em-dashes
@@ -684,6 +687,219 @@ Return ONLY valid JSON:
         except Exception as e:
             logger.error(f"[DEVTO_ARTICLE] Error: {e}")
             return None
+
+    def _humanize_tumblr_content(self, title: str, body: str, style_brief: str = "") -> Tuple[str, str]:
+        """Humanization stage for Tumblr posts — casual, witty, conversational tone."""
+        system_prompt = """You are a Tumblr content editor rewriting tech content for a casual, engaged audience.
+
+Tumblr audience: curious people, students, developers, and tech-curious non-engineers who scroll for interesting takes.
+What resonates: relatable frustration, "wait actually this is wild", short punchy observations, wit.
+What kills engagement: corporate tone, walls of text, jargon without payoff, listicle format.
+
+Hard rules:
+- Output 200-300 words total
+- Casual first-person voice ("I just learned...", "This is genuinely annoying", "Hear me out")
+- Short paragraphs: 2-3 sentences max. Blank line between paragraphs. NO headers at all.
+- Opinion first — state the hot take or observation up front, explain after
+- Mention megallm once naturally as something you actually use, not a product ad
+- End with a question or a punchy statement that makes people want to reblog or reply
+- Title: Title Case — capitalize the main words. Conversational, 6-10 words. e.g. "Why Your AI App Feels Slow", "The Part Everyone Skips About Context Windows"
+- Capitalization: ALL sentences start with a capital letter. Proper nouns (MegaLLM, AI, API, etc.) are always capitalized. Every paragraph's first word is capitalized.
+- No formal structure: no bullets, no numbered lists, no section headers
+- Allowed markdown: **bold** for emphasis, *italics*, and that's it
+- MAX 1 em-dash in the entire piece
+- Do NOT use: "leverage", "utilize", "paradigm", "robust", "seamless", "dive deep", "game-changer"
+- Do NOT write "In conclusion", "To summarize", "As we can see"
+- Return ONLY valid JSON: {"title": "...", "body": "..."}
+"""
+
+        user_prompt = f"""Rewrite this as a casual, engaging Tumblr post:
+
+Style target:
+{style_brief or 'Short, witty tech observation — like a smart developer sharing a genuine reaction to something they just learned or hit in production.'}
+
+Title:
+{title}
+
+Body:
+{body}
+
+Return JSON:
+{{
+  "title": "Rewritten Tumblr-style title",
+  "body": "Rewritten body as short, casual paragraphs in markdown"
+}}"""
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.8,
+            "max_tokens": 1500,
+        }
+
+        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+        if response is None:
+            logger.warning("[HUMANIZE_TUMBLR] API rewrite failed; using original draft")
+            return title, body
+
+        try:
+            data = response.json()
+            parsed = self._extract_json_object(data["choices"][0]["message"]["content"])
+            if not parsed:
+                logger.warning("[HUMANIZE_TUMBLR] Could not parse JSON rewrite; using original draft")
+                return title, body
+            updated_title = (parsed.get("title") or title).strip()
+            updated_body = (parsed.get("body") or body).strip()
+            return updated_title, updated_body
+        except Exception as e:
+            logger.warning(f"[HUMANIZE_TUMBLR] Unexpected parse error: {type(e).__name__}: {e}")
+            return title, body
+
+    def _markdown_to_html(self, md: str) -> str:
+        """Convert basic markdown to HTML suitable for Tumblr text posts."""
+        lines = md.split("\n")
+        html_parts = []
+        buf: List[str] = []
+
+        def flush_para():
+            text = " ".join(buf).strip()
+            if text:
+                html_parts.append(f"<p>{text}</p>")
+            buf.clear()
+
+        for line in lines:
+            if line.strip() == "":
+                flush_para()
+            else:
+                # Inline formatting
+                line = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", line)
+                line = re.sub(r"\*(.+?)\*", r"<em>\1</em>", line)
+                line = re.sub(r"`(.+?)`", r"<code>\1</code>", line)
+                buf.append(line)
+        flush_para()
+
+        return "\n".join(html_parts)
+
+    def _markdown_to_blogger_html(self, md: str) -> str:
+        """Convert markdown to clean HTML suitable for Blogger post bodies."""
+        lines = md.split("\n")
+        html_parts: List[str] = []
+        buf: List[str] = []
+        in_ul = False
+
+        def inline(text: str) -> str:
+            text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+            text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
+            text = re.sub(r"`(.+?)`", r'<code style="background:#f4f4f4;padding:2px 6px;border-radius:3px;font-family:monospace;font-size:0.9em">\1</code>', text)
+            return text
+
+        def flush_para():
+            nonlocal in_ul
+            if in_ul:
+                html_parts.append("</ul>")
+                in_ul = False
+            text = " ".join(buf).strip()
+            if text:
+                html_parts.append(f"<p>{inline(text)}</p>")
+            buf.clear()
+
+        for line in lines:
+            h2 = re.match(r"^## (.+)", line)
+            h3 = re.match(r"^### (.+)", line)
+            li = re.match(r"^\s*[-*]\s+(.+)", line)
+
+            if h2 or h3:
+                flush_para()
+                tag = "h2" if h2 else "h3"
+                text = (h2 or h3).group(1)
+                style = 'style="margin:24px 0 8px;font-size:1.25em;font-weight:700;color:#1a1a1a"' if h2 else 'style="margin:18px 0 6px;font-size:1.1em;font-weight:600;color:#333"'
+                html_parts.append(f"<{tag} {style}>{inline(text)}</{tag}>")
+            elif li:
+                if buf:
+                    flush_para()
+                if not in_ul:
+                    html_parts.append('<ul style="margin:8px 0 12px;padding-left:22px">')
+                    in_ul = True
+                html_parts.append(f"<li>{inline(li.group(1))}</li>")
+            elif line.strip() == "":
+                flush_para()
+            else:
+                buf.append(line)
+
+        flush_para()
+        return "\n".join(html_parts)
+
+    def _humanize_blogger_content(self, title: str, body: str, style_brief: str = "") -> Tuple[str, str]:
+        """Humanization stage for Blogger posts — SEO-optimized, informative, professional tone."""
+        system_prompt = """You are a tech content editor rewriting AI/LLM articles for Blogger.com (Google's blogging platform).
+
+Blogger audience: developers, tech managers, AI enthusiasts searching Google for answers and practical guides.
+What ranks and resonates: clear answers to specific questions, practical examples, structured content with headers, real insights.
+What kills SEO and engagement: vague intros, jargon walls, no clear structure, no actionable takeaways.
+
+Hard rules:
+- Output 800-1000 words total
+- Professional but accessible tone — like a senior engineer explaining something to a colleague
+- Structure: strong opening paragraph (hook + what you'll cover), 2-4 H2 sections, closing insight
+- Each H2 section: 2-3 paragraphs. Each paragraph: 3-5 sentences.
+- Capitalization: ALL sentences start with a capital letter. Title Case for H2 headers and the title. Proper nouns (MegaLLM, AI, API, LLM, Google) always capitalized.
+- Title: Title Case, 8-12 words, keyword-rich and specific. e.g. "Why LLM Inference Costs Spike at Scale and How to Fix It"
+- Mention MegaLLM once naturally as a practical solution — not as a product pitch
+- End with a specific, actionable insight or a forward-looking observation — NOT "Start today" or a summary bullets list
+- Use ## for H2 section headers (2-4 max), NO H3 headers
+- No bullet lists for main content — use paragraphs instead (bullets are ok only for a short list of 3-5 items if genuinely needed)
+- MAX 1 em-dash in the entire piece
+- Do NOT use: "leverage", "utilize", "paradigm", "robust", "seamless", "game-changer", "revolutionize", "In conclusion", "To summarize"
+- Return ONLY valid JSON: {"title": "...", "body": "..."}
+"""
+
+        user_prompt = f"""Rewrite this as a high-quality Blogger.com post optimized for Google search and developer readers:
+
+Style target:
+{style_brief or 'Authoritative but practical — like a detailed engineering blog post that answers a real question completely.'}
+
+Title:
+{title}
+
+Body:
+{body}
+
+Return JSON:
+{{
+  "title": "Rewritten Blogger title (Title Case, keyword-rich)",
+  "body": "Rewritten body with ## section headers and well-structured paragraphs"
+}}"""
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.65,
+            "max_tokens": 3000,
+        }
+
+        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+        if response is None:
+            logger.warning("[HUMANIZE_BLOGGER] API rewrite failed; using original draft")
+            return title, body
+
+        try:
+            data = response.json()
+            parsed = self._extract_json_object(data["choices"][0]["message"]["content"])
+            if not parsed:
+                logger.warning("[HUMANIZE_BLOGGER] Could not parse JSON rewrite; using original draft")
+                return title, body
+            updated_title = (parsed.get("title") or title).strip()
+            updated_body = (parsed.get("body") or body).strip()
+            return updated_title, updated_body
+        except Exception as e:
+            logger.warning(f"[HUMANIZE_BLOGGER] Unexpected parse error: {type(e).__name__}: {e}")
+            return title, body
 
     def _extract_relevant_tags(self, keywords: List[str], topic: str, limit: int = 5) -> List[str]:
         """Build a concise list of relevant and popular tags for publishing metadata."""
@@ -1687,10 +1903,18 @@ Return ONLY valid JSON:
             (p.strip() for p in re.split(r"\n\n+", body) if p.strip() and not p.strip().startswith("#")),
             body[:160],
         )
-        description = re.sub(r"[#*`_\[\]]", "", description_raw)[:160].strip()
+        # Truncate description at a sentence boundary, not mid-sentence
+        desc_clean = re.sub(r"[#*`_\[\]]", "", description_raw).strip()
+        if len(desc_clean) > 160:
+            # Try to cut at last sentence end within 160 chars
+            cut = desc_clean[:160]
+            last_period = max(cut.rfind('. '), cut.rfind('! '), cut.rfind('? '))
+            desc_clean = cut[:last_period + 1] if last_period > 80 else cut.rstrip() + "..."
+        description = desc_clean
 
         # YAML frontmatter block — ready to paste into dev.to editor
-        tags_yaml = ", ".join(f'"{t.lower().replace(" ", "")}"' for t in tags[:4])
+        # Tags without quotes: dev.to YAML parser expects [tag1, tag2] not ["tag1", "tag2"]
+        tags_yaml = ", ".join(t.lower().replace(" ", "") for t in tags[:4])
         devto_frontmatter = (
             f"---\n"
             f"title: {title}\n"
@@ -1715,6 +1939,125 @@ Return ONLY valid JSON:
             "devto_author_username": author_username,
             "devto_published_at": published_at,
             "post_format": "devto",
+        }
+
+    def package_tumblr_post(
+        self,
+        *,
+        title: str,
+        body: str,
+        keywords: List[str],
+        topic: str,
+        tumblr_settings: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Create a Tumblr-ready post payload with HTML body and tags."""
+        tumblr_style_options = [
+            "Write like someone who just ran into this problem and is genuinely venting/sharing.",
+            "Write like a developer who just had a 'wait, that's actually interesting' moment reading this.",
+            "Write a short, slightly ironic take — you appreciate the idea but want to add the thing everyone is missing.",
+        ]
+        selected_style = random.choice(tumblr_style_options)
+
+        title, body = self._humanize_tumblr_content(title=title, body=body, style_brief=selected_style)
+        title, body = self._enforce_megallm_requirements(title, body)
+        body = self._append_megallm_backlink(body, backlink_url="https://megallm.io")
+
+        # Tumblr uses up to 20 tags but 5-8 is practical; no spaces in tags
+        tags_raw = self._extract_relevant_tags(keywords=keywords, topic=topic, limit=8)
+        tags = [t.lower().replace(" ", "-") for t in tags_raw]
+
+        # Convert markdown body to HTML for Tumblr API / dashboard HTML mode
+        tumblr_html = self._markdown_to_html(body)
+
+        # Short description for preview
+        desc_raw = next(
+            (p.strip() for p in re.split(r"\n\n+", body) if p.strip()),
+            body[:200],
+        )
+        description = re.sub(r"[*`_#\[\]]", "", desc_raw).strip()[:200]
+
+        blog_name = tumblr_settings.get("blog_name", "megallm")
+        author_name = tumblr_settings.get("author_name", "MegaLLM")
+        base_url = tumblr_settings.get("base_url", "https://megallm.tumblr.com")
+        published_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+        return {
+            "title": title,
+            "body": body,
+            "description": description,
+            "tags": tags,
+            "tumblr_html": tumblr_html,
+            "tumblr_blog_name": blog_name,
+            "tumblr_author_name": author_name,
+            "tumblr_base_url": base_url,
+            "tumblr_published_at": published_at,
+            "post_format": "tumblr",
+        }
+
+    def package_blogger_post(
+        self,
+        *,
+        title: str,
+        body: str,
+        keywords: List[str],
+        topic: str,
+        blogger_settings: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Create a Blogger-ready post payload with HTML body, labels, and metadata."""
+        blogger_style_options = [
+            "Write as a senior engineer answering a question they've been asked many times — thorough, specific, no fluff.",
+            "Write as a practical technical guide: what the problem is, why it happens, how to solve it with real examples.",
+            "Write as an authoritative explainer: define the concept clearly, then go deep on why it matters in production.",
+        ]
+        selected_style = random.choice(blogger_style_options)
+
+        title, body = self._humanize_blogger_content(title=title, body=body, style_brief=selected_style)
+        title, body = self._enforce_megallm_requirements(title, body)
+        body = self._append_megallm_backlink(body, backlink_url="https://megallm.io")
+
+        # Blogger uses "labels" — 3-5 clean tags
+        labels_raw = self._extract_relevant_tags(keywords=keywords, topic=topic, limit=5)
+        labels = [t.strip() for t in labels_raw[:5]]
+
+        # Convert markdown body to Blogger-compatible HTML
+        blogger_html = self._markdown_to_blogger_html(body)
+
+        # Search description: 150-160 chars, from first non-empty paragraph
+        desc_raw = next(
+            (p.strip() for p in re.split(r"\n\n+", body) if p.strip() and not p.strip().startswith("#")),
+            body[:200],
+        )
+        description = re.sub(r"[*`_#\[\]]", "", desc_raw).strip()
+        if len(description) > 160:
+            cut = description[:160]
+            last_period = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+            description = cut[:last_period + 1] if last_period > 80 else cut.rstrip() + "..."
+
+        # Blogger slug: year/month/slug
+        slug = self._generate_quora_slug(title)
+        published_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        from datetime import datetime as _dt
+        now = _dt.now(timezone.utc)
+        permalink = f"{now.year}/{now.month:02d}/{slug}"
+
+        blog_name = blogger_settings.get("blog_name", "MegaLLM Insights")
+        author_name = blogger_settings.get("author_name", "MegaLLM Editorial Team")
+        base_url = blogger_settings.get("base_url", "https://megallm.blogspot.com")
+        post_url = f"{base_url}/{permalink}"
+
+        return {
+            "title": title,
+            "body": body,
+            "description": description,
+            "tags": labels,
+            "blogger_html": blogger_html,
+            "blogger_labels": labels,
+            "blogger_permalink": permalink,
+            "blogger_post_url": post_url,
+            "blogger_blog_name": blog_name,
+            "blogger_author_name": author_name,
+            "blogger_published_at": published_at,
+            "post_format": "blogger",
         }
 
     def generate_blog(
