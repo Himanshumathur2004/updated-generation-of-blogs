@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        header { background: white; padding: 24px 30px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); display: flex; justify-content: space-between; align-items: center; }
+        h1 { color: #1a1a2e; font-size: 26px; }
+        .nav-links { display: flex; gap: 12px; }
+        .nav-btn { padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; text-decoration: none; transition: all 0.3s; }
+        .nav-btn:hover { background: #5568d3; }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 24px; }
+        .stat-card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; }
+        .stat-card h3 { color: #666; font-size: 14px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-value { font-size: 42px; font-weight: 700; color: #667eea; }
+        .stat-label { color: #999; font-size: 13px; margin-top: 4px; }
+        .stat-card.success .stat-value { color: #10b981; }
+        .stat-card.warning .stat-value { color: #f59e0b; }
+        .stat-card.info .stat-value { color: #3b82f6; }
+
+        .charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 24px; }
+        .chart-card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .chart-card h3 { color: #333; margin-bottom: 20px; font-size: 18px; }
+        .chart-container { position: relative; height: 280px; }
+
+        .activity-section { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .activity-section h3 { color: #333; margin-bottom: 20px; font-size: 18px; }
+        .activity-list { max-height: 400px; overflow-y: auto; }
+        .activity-item { display: flex; align-items: center; padding: 14px 0; border-bottom: 1px solid #eee; }
+        .activity-item:last-child { border-bottom: none; }
+        .activity-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 16px; font-size: 18px; }
+        .activity-icon.generated { background: #e0e7ff; }
+        .activity-icon.posted { background: #d1fae5; }
+        .activity-content { flex: 1; }
+        .activity-title { font-weight: 600; color: #333; margin-bottom: 4px; }
+        .activity-meta { font-size: 13px; color: #888; }
+        .activity-time { font-size: 12px; color: #aaa; }
+        .status-badge { padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .status-badge.draft { background: #fef3c7; color: #92400e; }
+        .status-badge.posted { background: #d1fae5; color: #065f46; }
+
+        .accounts-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        .accounts-table th, .accounts-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+        .accounts-table th { color: #666; font-weight: 600; font-size: 13px; text-transform: uppercase; }
+        .accounts-table td { color: #333; }
+        .accounts-table tr:hover { background: #f9f9f9; }
+
+        .loading { text-align: center; padding: 40px; color: #666; }
+
+        @media (max-width: 1024px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: 1fr; }
+            header { flex-direction: column; gap: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>📊 Centralized Analytics Dashboard</h1>
+                <p style="color: #666; margin-top: 4px;">Overview across all accounts</p>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn">📝 Main Dashboard</a>
+                <button class="nav-btn" onclick="loadAllData()">🔄 Refresh</button>
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Posts</h3>
+                <div class="stat-value" id="totalBlogs">-</div>
+                <div class="stat-label">All time</div>
+            </div>
+            <div class="stat-card success">
+                <h3>Posted</h3>
+                <div class="stat-value" id="postedBlogs">-</div>
+                <div class="stat-label">Published content</div>
+            </div>
+            <div class="stat-card warning">
+                <h3>Drafts</h3>
+                <div class="stat-value" id="draftBlogs">-</div>
+                <div class="stat-label">Awaiting publish</div>
+            </div>
+            <div class="stat-card info">
+                <h3>Success Rate</h3>
+                <div class="stat-value" id="successRate">-</div>
+                <div class="stat-label">Generation success</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>📈 Posts Over Time (Last 30 Days)</h3>
+                <div class="chart-container">
+                    <canvas id="trendsChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>📊 Posts by Account</h3>
+                <div class="chart-container">
+                    <canvas id="accountsChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>🎯 Status Distribution</h3>
+                <div class="chart-container">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>🏷️ Topic Distribution</h3>
+                <div class="chart-container">
+                    <canvas id="topicsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="activity-section">
+            <h3>🕐 Recent Activity</h3>
+            <div class="activity-list" id="activityList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        let trendsChart, accountsChart, statusChart, topicsChart;
+
+        const chartColors = [
+            '#667eea', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+            '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'
+        ];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            loadAllData();
+        });
+
+        function initCharts() {
+            // Trends Chart (Line)
+            const trendsCtx = document.getElementById('trendsChart').getContext('2d');
+            trendsChart = new Chart(trendsCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Posts Created',
+                        data: [],
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    }
+                }
+            });
+
+            // Accounts Chart (Bar)
+            const accountsCtx = document.getElementById('accountsChart').getContext('2d');
+            accountsChart = new Chart(accountsCtx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Posts',
+                        data: [],
+                        backgroundColor: chartColors
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            // Status Chart (Doughnut)
+            const statusCtx = document.getElementById('statusChart').getContext('2d');
+            statusChart = new Chart(statusCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Posted', 'Draft'],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: ['#10b981', '#f59e0b']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+
+            // Topics Chart (Pie)
+            const topicsCtx = document.getElementById('topicsChart').getContext('2d');
+            topicsChart = new Chart(topicsCtx, {
+                type: 'pie',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: chartColors
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+        }
+
+        async function loadAllData() {
+            await Promise.all([
+                loadGlobalStats(),
+                loadTrends(),
+                loadAccounts(),
+                loadRecentActivity()
+            ]);
+        }
+
+        async function loadGlobalStats() {
+            try {
+                const response = await fetch(`${API_BASE}/analytics/global`);
+                const data = await response.json();
+
+                document.getElementById('totalBlogs').textContent = data.total_blogs || 0;
+                document.getElementById('postedBlogs').textContent = data.posted_blogs || 0;
+                document.getElementById('draftBlogs').textContent = data.draft_blogs || 0;
+
+                const total = data.total_generations || 0;
+                const successful = data.successful_generations || 0;
+                const rate = total > 0 ? Math.round((successful / total) * 100) : 100;
+                document.getElementById('successRate').textContent = `${rate}%`;
+
+                // Update status chart
+                statusChart.data.datasets[0].data = [data.posted_blogs || 0, data.draft_blogs || 0];
+                statusChart.update();
+
+                // Update topics chart
+                const topics = data.blogs_by_topic || {};
+                topicsChart.data.labels = Object.keys(topics);
+                topicsChart.data.datasets[0].data = Object.values(topics);
+                topicsChart.update();
+
+            } catch (err) {
+                console.error('Error loading global stats:', err);
+            }
+        }
+
+        async function loadTrends() {
+            try {
+                const response = await fetch(`${API_BASE}/analytics/trends?days=30`);
+                const data = await response.json();
+
+                const labels = data.trends.map(t => {
+                    const date = new Date(t.date);
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                });
+                const values = data.trends.map(t => t.count);
+
+                trendsChart.data.labels = labels;
+                trendsChart.data.datasets[0].data = values;
+                trendsChart.update();
+
+            } catch (err) {
+                console.error('Error loading trends:', err);
+            }
+        }
+
+        async function loadAccounts() {
+            try {
+                const response = await fetch(`${API_BASE}/analytics/accounts?days=30`);
+                const data = await response.json();
+
+                const labels = data.activity.map(a => a.account_name);
+                const values = data.activity.map(a => a.blog_count);
+
+                accountsChart.data.labels = labels;
+                accountsChart.data.datasets[0].data = values;
+                accountsChart.update();
+
+            } catch (err) {
+                console.error('Error loading accounts:', err);
+            }
+        }
+
+        async function loadRecentActivity() {
+            try {
+                const response = await fetch(`${API_BASE}/analytics/recent?limit=20`);
+                const data = await response.json();
+
+                const activityList = document.getElementById('activityList');
+
+                if (!data.activity || data.activity.length === 0) {
+                    activityList.innerHTML = '<div class="loading">No recent activity</div>';
+                    return;
+                }
+
+                activityList.innerHTML = data.activity.map(item => {
+                    const iconClass = item.status === 'posted' ? 'posted' : 'generated';
+                    const icon = item.status === 'posted' ? '✓' : '📝';
+                    const timeAgo = getTimeAgo(item.created_at);
+
+                    return `
+                        <div class="activity-item">
+                            <div class="activity-icon ${iconClass}">${icon}</div>
+                            <div class="activity-content">
+                                <div class="activity-title">${escapeHtml(item.title)}</div>
+                                <div class="activity-meta">
+                                    ${escapeHtml(item.account_name)} • ${item.topic || 'No topic'}
+                                </div>
+                            </div>
+                            <span class="status-badge ${item.status}">${item.status}</span>
+                            <div class="activity-time">${timeAgo}</div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                console.error('Error loading recent activity:', err);
+            }
+        }
+
+        function getTimeAgo(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return date.toLocaleDateString();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Auto-refresh every 60 seconds
+        setInterval(loadAllData, 60000);
+    </script>
+</body>
+</html>

@@ -303,6 +303,47 @@ def generation_history(account_id):
     return jsonify({"history": history}), 200
 
 
+# ============================================================================
+# ANALYTICS ROUTES
+# ============================================================================
+
+@app.route("/analytics", methods=["GET"])
+def analytics_page():
+    """Serve the analytics dashboard HTML."""
+    return render_template("analytics.html")
+
+
+@app.route("/api/analytics/global", methods=["GET"])
+def analytics_global():
+    """Get global statistics across all accounts."""
+    stats = db.get_global_stats()
+    return jsonify(stats), 200
+
+
+@app.route("/api/analytics/trends", methods=["GET"])
+def analytics_trends():
+    """Get blog generation trends over time."""
+    days = int(request.args.get("days", 30))
+    trends = db.get_blogs_over_time(days=days)
+    return jsonify({"trends": trends, "days": days}), 200
+
+
+@app.route("/api/analytics/accounts", methods=["GET"])
+def analytics_accounts():
+    """Get activity per account."""
+    days = int(request.args.get("days", 7))
+    activity = db.get_account_activity(days=days)
+    return jsonify({"activity": activity, "days": days}), 200
+
+
+@app.route("/api/analytics/recent", methods=["GET"])
+def analytics_recent():
+    """Get recent activity across all accounts."""
+    limit = int(request.args.get("limit", 20))
+    activity = db.get_recent_activity(limit=limit)
+    return jsonify({"activity": activity}), 200
+
+
 @app.route("/api/blogs/generate", methods=["POST"])
 def generate_blogs():
     """Generate new blogs for an account."""

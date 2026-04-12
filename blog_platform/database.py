@@ -179,6 +179,107 @@ class InMemoryDatabase:
             "recent_blogs": recent_blogs,
         }
 
+    # ========== ANALYTICS METHODS ==========
+
+    def get_global_stats(self) -> Dict:
+        """Get global statistics across all accounts."""
+        total_blogs = len(self.blogs)
+        posted_blogs = sum(1 for b in self.blogs.values() if b.get("status") == "posted")
+        draft_blogs = sum(1 for b in self.blogs.values() if b.get("status") == "draft")
+
+        # Count by topic
+        topic_counts = {}
+        for blog in self.blogs.values():
+            topic = blog.get("topic", "unknown")
+            topic_counts[topic] = topic_counts.get(topic, 0) + 1
+
+        # Count by account
+        account_counts = {}
+        for blog in self.blogs.values():
+            acc_id = blog.get("account_id", "unknown")
+            account_counts[acc_id] = account_counts.get(acc_id, 0) + 1
+
+        return {
+            "total_blogs": total_blogs,
+            "posted_blogs": posted_blogs,
+            "draft_blogs": draft_blogs,
+            "total_accounts": len(self.accounts),
+            "blogs_by_topic": topic_counts,
+            "blogs_by_account": account_counts,
+            "total_generations": len(self.generation_history),
+            "successful_generations": sum(1 for g in self.generation_history if not g.get("error")),
+            "failed_generations": sum(1 for g in self.generation_history if g.get("error")),
+        }
+
+    def get_blogs_over_time(self, days: int = 30) -> List[Dict]:
+        """Get blog counts by day for the last N days."""
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        daily_counts = {}
+        for blog in self.blogs.values():
+            try:
+                created = datetime.fromisoformat(blog.get("created_at", "").replace("Z", "+00:00"))
+                if created >= cutoff:
+                    date_str = created.strftime("%Y-%m-%d")
+                    daily_counts[date_str] = daily_counts.get(date_str, 0) + 1
+            except Exception:
+                continue
+
+        return [{"date": k, "count": v} for k, v in sorted(daily_counts.items())]
+
+    def get_account_activity(self, days: int = 7) -> List[Dict]:
+        """Get activity per account for the last N days."""
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        activity = {}
+        for blog in self.blogs.values():
+            try:
+                created = datetime.fromisoformat(blog.get("created_at", "").replace("Z", "+00:00"))
+                if created >= cutoff:
+                    acc_id = blog.get("account_id", "unknown")
+                    if acc_id not in activity:
+                        activity[acc_id] = {"blog_count": 0, "posted_count": 0, "draft_count": 0}
+                    activity[acc_id]["blog_count"] += 1
+                    if blog.get("status") == "posted":
+                        activity[acc_id]["posted_count"] += 1
+                    else:
+                        activity[acc_id]["draft_count"] += 1
+            except Exception:
+                continue
+
+        # Add account names
+        for acc_id in activity:
+            acc = self.accounts.get(acc_id, {})
+            activity[acc_id]["account_id"] = acc_id
+            activity[acc_id]["account_name"] = acc.get("name", acc_id)
+
+        return list(activity.values())
+
+    def get_recent_activity(self, limit: int = 20) -> List[Dict]:
+        """Get recent activity across all accounts."""
+        all_blogs = sorted(
+            self.blogs.values(),
+            key=lambda x: x.get("created_at", ""),
+            reverse=True
+        )[:limit]
+
+        activities = []
+        for blog in all_blogs:
+            acc = self.accounts.get(blog.get("account_id"), {})
+            activities.append({
+                "blog_id": blog.get("_id"),
+                "title": blog.get("title", "Untitled")[:50],
+                "account_id": blog.get("account_id"),
+                "account_name": acc.get("name", blog.get("account_id")),
+                "status": blog.get("status"),
+                "topic": blog.get("topic"),
+                "created_at": blog.get("created_at"),
+            })
+
+        return activities
+
 
 class Database:
     """MongoDB database wrapper with in-memory fallback."""
@@ -438,10 +539,10 @@ class Database:
         
         # Get recent blogs
         recent_blogs = self.get_blogs_by_account(account_id, limit=5)
-        
+
         # Filter out None topic keys for JSON serialization
         blogs_by_topic = {str(item["_id"]): item["count"] for item in topic_counts if item["_id"] is not None}
-        
+
         return {
             "account": account,
             "total_blogs": account.get("blog_count", 0),
@@ -451,3 +552,137 @@ class Database:
             "blogs_by_topic": blogs_by_topic,
             "recent_blogs": recent_blogs,
         }
+
+    # ========== ANALYTICS METHODS ==========
+
+    def get_global_stats(self) -> Dict:
+        """Get global statistics across all accounts."""
+        if self.is_memory:
+            return self._fallback.get_global_stats()
+
+        # Total blogs
+        total_blogs = self.db.blogs.count_documents({})
+
+        # Status breakdown
+        status_agg = list(self.db.blogs.aggregate([
+            {"$group": {"_id": "$status", "count": {"$sum": 1}}}
+        ]))
+        status_counts = {item["_id"]: item["count"] for item in status_agg if item["_id"]}
+
+        # Topic breakdown
+        topic_agg = list(self.db.blogs.aggregate([
+            {"$group": {"_id": "$topic", "count": {"$sum": 1}}}
+        ]))
+        topic_counts = {str(item["_id"]): item["count"] for item in topic_agg if item["_id"]}
+
+        # Account breakdown
+        account_agg = list(self.db.blogs.aggregate([
+            {"$group": {"_id": "$account_id", "count": {"$sum": 1}}}
+        ]))
+        account_counts = {item["_id"]: item["count"] for item in account_agg if item["_id"]}
+
+        # Generation stats
+        total_generations = self.db.generation_history.count_documents({})
+        successful_generations = self.db.generation_history.count_documents({"error": None})
+        failed_generations = total_generations - successful_generations
+
+        return {
+            "total_blogs": total_blogs,
+            "posted_blogs": status_counts.get("posted", 0),
+            "draft_blogs": status_counts.get("draft", 0),
+            "total_accounts": len(self.get_all_accounts()),
+            "blogs_by_topic": topic_counts,
+            "blogs_by_account": account_counts,
+            "total_generations": total_generations,
+            "successful_generations": successful_generations,
+            "failed_generations": failed_generations,
+        }
+
+    def get_blogs_over_time(self, days: int = 30) -> List[Dict]:
+        """Get blog counts by day for the last N days."""
+        if self.is_memory:
+            return self._fallback.get_blogs_over_time(days)
+
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        pipeline = [
+            {"$match": {"created_at": {"$gte": cutoff.isoformat()}}},
+            {"$group": {
+                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": {"$dateFromString": {"dateString": "$created_at"}}}},
+                "count": {"$sum": 1}
+            }},
+            {"$sort": {"_id": 1}}
+        ]
+
+        try:
+            result = list(self.db.blogs.aggregate(pipeline))
+            return [{"date": item["_id"], "count": item["count"]} for item in result if item["_id"]]
+        except Exception as e:
+            logger.error(f"Error in get_blogs_over_time: {e}")
+            return []
+
+    def get_account_activity(self, days: int = 7) -> List[Dict]:
+        """Get activity per account for the last N days."""
+        if self.is_memory:
+            return self._fallback.get_account_activity(days)
+
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        pipeline = [
+            {"$match": {"created_at": {"$gte": cutoff.isoformat()}}},
+            {"$group": {
+                "_id": "$account_id",
+                "blog_count": {"$sum": 1},
+                "posted_count": {"$sum": {"$cond": [{"$eq": ["$status", "posted"]}, 1, 0]}},
+                "draft_count": {"$sum": {"$cond": [{"$eq": ["$status", "draft"]}, 1, 0]}}
+            }}
+        ]
+
+        try:
+            result = list(self.db.blogs.aggregate(pipeline))
+            accounts = {a["account_id"]: a for a in self.get_all_accounts()}
+            activity = []
+            for item in result:
+                acc_id = item["_id"]
+                acc = accounts.get(acc_id, {})
+                activity.append({
+                    "account_id": acc_id,
+                    "account_name": acc.get("name", acc_id),
+                    "blog_count": item["blog_count"],
+                    "posted_count": item["posted_count"],
+                    "draft_count": item["draft_count"],
+                })
+            return activity
+        except Exception as e:
+            logger.error(f"Error in get_account_activity: {e}")
+            return []
+
+    def get_recent_activity(self, limit: int = 20) -> List[Dict]:
+        """Get recent activity across all accounts."""
+        if self.is_memory:
+            return self._fallback.get_recent_activity(limit)
+
+        try:
+            blogs = list(self.db.blogs.find()
+                .sort("created_at", -1)
+                .limit(limit))
+
+            accounts = {a["account_id"]: a for a in self.get_all_accounts()}
+            activities = []
+            for blog in blogs:
+                acc = accounts.get(blog.get("account_id"), {})
+                activities.append({
+                    "blog_id": str(blog.get("_id")),
+                    "title": (blog.get("title") or "Untitled")[:50],
+                    "account_id": blog.get("account_id"),
+                    "account_name": acc.get("name", blog.get("account_id")),
+                    "status": blog.get("status"),
+                    "topic": blog.get("topic"),
+                    "created_at": blog.get("created_at"),
+                })
+            return activities
+        except Exception as e:
+            logger.error(f"Error in get_recent_activity: {e}")
+            return []
