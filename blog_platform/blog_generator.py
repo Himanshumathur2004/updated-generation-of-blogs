@@ -27,17 +27,54 @@ class BlogGenerator:
         logger.info(f"[INIT] BlogGenerator initialized with model: {self.model}, base_url: {self.base_url}, max_retries: {max_retries}")
 
     def _extract_json_object(self, raw_response: str) -> Optional[Dict[str, Any]]:
-        """Extract and parse first JSON object from model response."""
-        cleaned = (raw_response or "").replace("```json", "").replace("```", "").strip()
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start == -1 or end == -1 or end <= start:
+        """Extract and parse the first JSON object from an LLM response."""
+        text = (raw_response or "").strip()
+        if not text:
             return None
 
-        try:
-            return json.loads(cleaned[start:end + 1])
-        except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+
+        def _decode_candidate(candidate: str) -> Optional[Dict[str, Any]]:
+            candidate = (candidate or "").strip()
+            if not candidate:
+                return None
+
+            # Some models return a JSON string that itself contains JSON.
+            try:
+                loaded = json.loads(candidate)
+                if isinstance(loaded, dict):
+                    return loaded
+                if isinstance(loaded, str):
+                    nested = json.loads(loaded)
+                    if isinstance(nested, dict):
+                        return nested
+            except Exception:
+                pass
+
+            # Fall back to first decodable object starting at any '{'.
+            for match in re.finditer(r"\{", candidate):
+                start = match.start()
+                try:
+                    parsed, _ = decoder.raw_decode(candidate[start:])
+                    if isinstance(parsed, dict):
+                        return parsed
+                except json.JSONDecodeError:
+                    continue
+
             return None
+
+        candidates: List[str] = [text]
+
+        # Prefer fenced JSON blocks if present.
+        fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+        candidates = [*fenced_blocks, *candidates]
+
+        for candidate in candidates:
+            parsed = _decode_candidate(candidate)
+            if parsed:
+                return parsed
+
+        return None
 
     def _sanitize_professional_title(self, title: str, topic: str = "") -> str:
         """Normalize generated titles to a professional, non-promotional style."""
@@ -253,6 +290,29 @@ class BlogGenerator:
         normalized = re.sub(r"\n{3,}", "\n\n", normalized)
         normalized = re.sub(r"[ \t]{2,}", " ", normalized)
         return normalized.strip()
+
+    def _strip_html_tags(self, text: str) -> str:
+        """Convert simple HTML fragments into readable plain/markdown-like text."""
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return cleaned
+
+        cleaned = html.unescape(cleaned)
+        cleaned = re.sub(r"(?is)<\s*br\s*/?\s*>", "\n", cleaned)
+        cleaned = re.sub(r"(?is)</\s*p\s*>", "\n\n", cleaned)
+        cleaned = re.sub(r"(?is)<\s*p\b[^>]*>", "", cleaned)
+        cleaned = re.sub(r"(?is)</\s*h[1-6]\s*>", "\n\n", cleaned)
+        cleaned = re.sub(r"(?is)<\s*h([1-6])\b[^>]*>\s*", "## ", cleaned)
+        cleaned = re.sub(r"(?is)<\s*li\b[^>]*>\s*", "- ", cleaned)
+        cleaned = re.sub(r"(?is)</\s*li\s*>", "\n", cleaned)
+        cleaned = re.sub(r"(?is)<\s*/?\s*(ul|ol)\b[^>]*>", "\n", cleaned)
+        cleaned = re.sub(r"(?is)<\s*a\b[^>]*>", "", cleaned)
+        cleaned = re.sub(r"(?is)</\s*a\s*>", "", cleaned)
+        cleaned = re.sub(r"(?is)<[^>]+>", "", cleaned)
+
+        cleaned = re.sub(r"[ \t]+", " ", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
 
     def _simplify_for_common_reader(self, body: str) -> str:
         """Make prose easier for a non-technical reader: simpler words and shorter paragraphs."""
@@ -628,6 +688,7 @@ Return JSON:
     def _generate_devto_article_from_source(self, article_title: str, article_content: str, article_source: str) -> Optional[Dict[str, Any]]:
         """Generate an opinionated dev.to post inspired by a scraped dev.to article."""
         logger.info(f"[DEVTO_ARTICLE] Generating from source: {article_title[:80]}")
+        clean_source_content = self._strip_html_tags(article_content)
 
         system_prompt = """You are a developer writing a dev.to post inspired by something you just read.
 
@@ -654,7 +715,7 @@ Source platform: {article_source}
 Article title: {article_title}
 
 Article content (for context only — do NOT copy):
-{article_content[:1000]}
+{clean_source_content[:1000]}
 
 Write your own angle. It can be:
 - A "yes, and here's what they missed" take
@@ -686,13 +747,26 @@ Return ONLY valid JSON:
             response.raise_for_status()
             raw = response.json()["choices"][0]["message"]["content"]
             parsed = self._extract_json_object(raw)
-            if not parsed:
-                logger.error("[DEVTO_ARTICLE] JSON parse failed")
-                return None
-            title = (parsed.get("title") or article_title).strip()
-            body = parsed.get("body", "")
+            title = article_title.strip() or "A Practical Dev.to Take"
+            body = ""
+
+            if parsed:
+                title = (parsed.get("title") or title).strip()
+                body = (parsed.get("body") or "").strip()
+            else:
+                snippet = (raw or "")[:300].replace("\n", " ")
+                logger.warning(f"[DEVTO_ARTICLE] JSON parse failed; using fallback body. Raw snippet: {snippet}")
+                body = (raw or "").replace("```json", "").replace("```", "").strip()
+
             if not body:
+                body = (article_content or "").strip()
+
+            if not body:
+                logger.error("[DEVTO_ARTICLE] Empty body after parse and fallback")
                 return None
+
+            body = self._strip_html_tags(body)
+            title = self._sanitize_professional_title(title, topic=article_title)
             tags = self._extract_relevant_tags(keywords=["AI", "developer", "megallm"], topic=article_title, limit=4)
             description = self._build_description_with_tags(body, tags)
             return {"title": title, "body": body, "description": description, "tags": tags}

@@ -4,6 +4,8 @@ from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from functools import wraps
 import logging
+import re
+import html
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -260,10 +262,29 @@ def copy_blog_content(blog_id):
     if not blog:
         return jsonify({"error": "Blog not found"}), 404
     
+    def _strip_html_for_copy(text: str) -> str:
+        value = (text or "").strip()
+        if not value:
+            return value
+        if not re.search(r"<[^>]+>", value):
+            return value
+
+        value = html.unescape(value)
+        value = re.sub(r"(?is)<\s*br\s*/?\s*>", "\n", value)
+        value = re.sub(r"(?is)</\s*p\s*>", "\n\n", value)
+        value = re.sub(r"(?is)<\s*/?\s*li\b[^>]*>", "\n- ", value)
+        value = re.sub(r"(?is)<[^>]+>", "", value)
+        value = re.sub(r"\n{3,}", "\n\n", value)
+        return value.strip()
+
+    body_raw = blog.get("body", "")
+    body_copy = _strip_html_for_copy(body_raw)
+
     return jsonify({
         "blog_id": blog_id,
         "title": blog.get("title", ""),
-        "body": blog.get("body", ""),
+        "body": body_copy,
+        "body_raw": body_raw,
         "topic": blog.get("topic", ""),
     }), 200
 
