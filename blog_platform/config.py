@@ -30,6 +30,24 @@ class Config:
     MODEL = os.getenv("MODEL", "claude-opus-4-6")
     MEGALLM_BACKLINK_URL = os.getenv("MEGALLM_BACKLINK_URL", "https://beta.megallm.io")
 
+    # MegaLLM Fallback Models (tried in order if primary fails)
+    MEGALLM_FALLBACK_MODELS = [
+        os.getenv("MEGALLM_FALLBACK_MODEL_1", "claude-sonnet-4-5"),
+        os.getenv("MEGALLM_FALLBACK_MODEL_2", "claude-haiku-4-5"),
+        os.getenv("MEGALLM_FALLBACK_MODEL_3", "gpt-4o"),
+    ]
+
+    # Chutes AI Configuration (Secondary Fallback)
+    CHUTES_API_TOKEN = os.getenv("CHUTES_API_TOKEN")
+    CHUTES_BASE_URL = os.getenv("CHUTES_BASE_URL", "https://llm.chutes.ai/v1")
+    CHUTES_MODEL = os.getenv("CHUTES_MODEL", "deepseek-ai/DeepSeek-V3.1-TEE")
+
+    # Fallback Provider Order: MegaLLM (primary + 3 fallbacks) -> Chutes AI
+    FALLBACK_PROVIDERS = [
+        {"name": "megallm", "base_url": MEGALLM_BASE_URL, "api_key": MEGALLM_API_KEY, "models": [MODEL] + MEGALLM_FALLBACK_MODELS},
+        {"name": "chutes", "base_url": CHUTES_BASE_URL, "api_key": CHUTES_API_TOKEN, "models": [CHUTES_MODEL]},
+    ]
+
     # Blogger account configuration (only this account generates Blogger-ready posts)
     BLOGGER_ACCOUNT_ID = os.getenv("BLOGGER_ACCOUNT_ID", "account_1")
     BLOGGER_BLOG_NAME = os.getenv("BLOGGER_BLOG_NAME", "MegaLLM Insights")

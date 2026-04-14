@@ -49,7 +49,16 @@ try:
         raise ValueError("Configuration validation failed")
     
     db = Database(Config.MONGODB_URI, Config.MONGODB_DB)
-    blog_generator = BlogGenerator(Config.MEGALLM_API_KEY, Config.MEGALLM_BASE_URL, Config.MODEL)
+
+    # Get fallback providers from config
+    fallback_providers = getattr(Config, 'FALLBACK_PROVIDERS', [])
+
+    blog_generator = BlogGenerator(
+        Config.MEGALLM_API_KEY,
+        Config.MEGALLM_BASE_URL,
+        Config.MODEL,
+        fallback_providers=fallback_providers
+    )
     logger.info("✓ App initialized")
     
 except Exception as e:

@@ -13,9 +13,9 @@ import requests
 logger = logging.getLogger(__name__)
 
 class BlogGenerator:
-    """Generate blog posts using MegaLLM API."""
-    
-    def __init__(self, api_key: str, base_url: str, model: str, max_retries: int = 3):
+    """Generate blog posts using MegaLLM API with fallback support."""
+
+    def __init__(self, api_key: str, base_url: str, model: str, max_retries: int = 3, fallback_providers: list = None):
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
         self.model = model
@@ -24,7 +24,219 @@ class BlogGenerator:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+
+        # Fallback providers configuration
+        # Format: [{"name": "provider_name", "base_url": "...", "api_key": "...", "models": ["model1", "model2"]}]
+        self.fallback_providers = fallback_providers or []
+        self.current_provider_index = 0
+        self.current_model_index = 0
+
         logger.info(f"[INIT] BlogGenerator initialized with model: {self.model}, base_url: {self.base_url}, max_retries: {max_retries}")
+        if self.fallback_providers:
+            logger.info(f"[INIT] Fallback providers configured: {len(self.fallback_providers)} providers")
+            for fp in self.fallback_providers:
+                logger.info(f"[INIT]   - {fp.get('name')}: {len(fp.get('models', []))} models")
+
+    def _get_current_provider(self) -> dict:
+        """Get the current provider configuration."""
+        if self.current_provider_index < len(self.fallback_providers):
+            return self.fallback_providers[self.current_provider_index]
+        return {"name": "megallm", "base_url": self.base_url, "api_key": self.api_key, "models": [self.model]}
+
+    def _get_current_model(self) -> str:
+        """Get the current model to use."""
+        provider = self._get_current_provider()
+        models = provider.get("models", [self.model])
+        if self.current_model_index < len(models):
+            return models[self.current_model_index]
+        return models[0] if models else self.model
+
+    def _switch_to_next_model(self) -> bool:
+        """
+        Switch to the next model in the current provider's model list.
+
+        Returns:
+            True if successfully switched to a new model, False if no more models available.
+        """
+        provider = self._get_current_provider()
+        models = provider.get("models", [])
+
+        if self.current_model_index + 1 < len(models):
+            self.current_model_index += 1
+            logger.warning(f"[FALLBACK] Switching to next model in {provider.get('name')}: {models[self.current_model_index]}")
+            return True
+
+        return False
+
+    def _switch_to_next_provider(self) -> bool:
+        """
+        Switch to the next provider in the fallback chain.
+
+        Returns:
+            True if successfully switched to a new provider, False if no more providers available.
+        """
+        if self.current_provider_index + 1 < len(self.fallback_providers):
+            self.current_provider_index += 1
+            self.current_model_index = 0
+            new_provider = self.fallback_providers[self.current_provider_index]
+            logger.warning(f"[FALLBACK] Switching to next provider: {new_provider.get('name')}")
+            return True
+
+        return False
+
+    def _reset_fallback_state(self):
+        """Reset fallback state to use primary provider/model."""
+        self.current_provider_index = 0
+        self.current_model_index = 0
+
+    def _make_api_call_with_fallback(self, url: str, payload: dict, attempt: int = 1) -> Optional[requests.Response]:
+        """
+        Make API call with fallback to alternative models and providers.
+
+        This method tries models/providers in order:
+        1. Primary MegaLLM model
+        2. MegaLLM fallback models (up to 3)
+        3. Chutes AI fallback
+
+        Args:
+            url: API endpoint URL (may be modified for different providers)
+            payload: Request payload (model will be updated)
+            attempt: Current attempt number (1-indexed)
+
+        Returns:
+            Response object or None if all fallbacks exhausted
+        """
+        provider = self._get_current_provider()
+        current_model = self._get_current_model()
+
+        # Build the correct URL for this provider
+        actual_url = f"{provider.get('base_url', self.base_url).rstrip('/')}/chat/completions"
+        actual_api_key = provider.get('api_key', self.api_key)
+
+        # Update headers for current provider
+        current_headers = {
+            "Authorization": f"Bearer {actual_api_key}",
+            "Content-Type": "application/json"
+        }
+
+        # Update payload with current model
+        payload_with_model = {**payload, "model": current_model}
+
+        logger.info(f"[API_CALL] Provider: {provider.get('name')}, Model: {current_model}, Attempt: {attempt}/{self.max_retries}")
+
+        try:
+            response = requests.post(
+                actual_url,
+                headers=current_headers,
+                json=payload_with_model,
+                timeout=60
+            )
+
+            # Handle success - validate response structure
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    choices = data.get("choices", [])
+                    if not choices:
+                        logger.warning(f"[API_INVALID] {provider.get('name')}/{current_model} returned no choices")
+                        # Try fallback
+                        if self._switch_to_next_model():
+                            return self._make_api_call_with_fallback(url, payload, 1)
+                        if self._switch_to_next_provider():
+                            return self._make_api_call_with_fallback(url, payload, 1)
+                        logger.error("[API_INVALID] All fallbacks exhausted - no choices in response")
+                        return None
+
+                    message = choices[0].get("message", {})
+                    content = message.get("content")
+                    if content is None:
+                        logger.warning(f"[API_INVALID] {provider.get('name')}/{current_model} returned no content")
+                        # Try fallback
+                        if self._switch_to_next_model():
+                            return self._make_api_call_with_fallback(url, payload, 1)
+                        if self._switch_to_next_provider():
+                            return self._make_api_call_with_fallback(url, payload, 1)
+                        logger.error("[API_INVALID] All fallbacks exhausted - no content in message")
+                        return None
+
+                    logger.info(f"[API_SUCCESS] {provider.get('name')}/{current_model} responded successfully")
+                    return response
+                except Exception as json_error:
+                    logger.warning(f"[API_INVALID] {provider.get('name')}/{current_model} returned invalid JSON: {json_error}")
+                    # Try fallback
+                    if self._switch_to_next_model():
+                        return self._make_api_call_with_fallback(url, payload, 1)
+                    if self._switch_to_next_provider():
+                        return self._make_api_call_with_fallback(url, payload, 1)
+                    logger.error("[API_INVALID] All fallbacks exhausted - invalid JSON")
+                    return None
+
+            # Handle errors that might be recoverable with fallback
+            if response.status_code in [401, 402, 404, 429, 500, 502, 503, 504]:
+                error_msg = response.text[:200] if response.text else f"HTTP {response.status_code}"
+                logger.warning(f"[API_ERROR] {provider.get('name')}/{current_model} failed: {error_msg}")
+
+                # Try next model in current provider first
+                if self._switch_to_next_model():
+                    return self._make_api_call_with_fallback(url, payload, 1)
+
+                # Then try next provider
+                if self._switch_to_next_provider():
+                    return self._make_api_call_with_fallback(url, payload, 1)
+
+                # All fallbacks exhausted
+                logger.error("[API_ERROR] All fallback providers exhausted")
+                return None
+
+            # Other status codes - try retry with backoff
+            if attempt < self.max_retries:
+                backoff = 2 ** (attempt - 1)
+                logger.warning(f"[API_RETRY] Retrying after {backoff}s...")
+                time.sleep(backoff)
+                return self._make_api_call_with_fallback(url, payload, attempt + 1)
+
+            return response
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"[API_TIMEOUT] {provider.get('name')}/{current_model} timed out")
+
+            if attempt < self.max_retries:
+                backoff = 2 ** (attempt - 1)
+                logger.warning(f"[API_RETRY] Retrying after {backoff}s...")
+                time.sleep(backoff)
+                return self._make_api_call_with_fallback(url, payload, attempt + 1)
+
+            # Try fallback after retries exhausted
+            if self._switch_to_next_model():
+                return self._make_api_call_with_fallback(url, payload, 1)
+            if self._switch_to_next_provider():
+                return self._make_api_call_with_fallback(url, payload, 1)
+
+            logger.error("[API_TIMEOUT] All fallbacks exhausted after timeout")
+            return None
+
+        except requests.exceptions.ConnectionError as e:
+            logger.warning(f"[API_ERROR] Connection error: {e}")
+
+            # Try fallback immediately on connection error
+            if self._switch_to_next_model():
+                return self._make_api_call_with_fallback(url, payload, 1)
+            if self._switch_to_next_provider():
+                return self._make_api_call_with_fallback(url, payload, 1)
+
+            logger.error("[API_ERROR] All fallbacks exhausted after connection error")
+            return None
+
+        except Exception as e:
+            logger.error(f"[API_ERROR] Unexpected error: {type(e).__name__}: {e}")
+
+            # Try fallback on unexpected errors
+            if self._switch_to_next_model():
+                return self._make_api_call_with_fallback(url, payload, 1)
+            if self._switch_to_next_provider():
+                return self._make_api_call_with_fallback(url, payload, 1)
+
+            return None
 
     def _extract_json_object(self, raw_response: str) -> Optional[Dict[str, Any]]:
         """Extract and parse the first JSON object from an LLM response."""
@@ -529,7 +741,8 @@ Return JSON:
             "max_tokens": 3200,
         }
 
-        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+        self._reset_fallback_state()
+        response = self._make_api_call_with_fallback(f"{self.base_url}/chat/completions", payload)
         if response is None:
             logger.warning("[HUMANIZE] API rewrite failed; using original draft")
             return title, body
@@ -595,7 +808,8 @@ Return JSON:
             "max_tokens": 1400,
         }
 
-        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+        self._reset_fallback_state()
+        response = self._make_api_call_with_fallback(f"{self.base_url}/chat/completions", payload)
         if response is None:
             logger.warning("[HUMANIZE_QUORA] API rewrite failed; using original draft")
             return title, body
@@ -667,7 +881,8 @@ Return JSON:
             "max_tokens": 2200,
         }
 
-        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+        self._reset_fallback_state()
+        response = self._make_api_call_with_fallback(f"{self.base_url}/chat/completions", payload)
         if response is None:
             logger.warning("[HUMANIZE_DEVTO] API rewrite failed; using original draft")
             return title, body
@@ -730,22 +945,40 @@ Return ONLY valid JSON:
 }}"""
 
         try:
-            response = requests.post(
+            # Reset fallback state before each generation
+            self._reset_fallback_state()
+            payload = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.8,
+                "max_tokens": 2500,
+            }
+            response = self._make_api_call_with_fallback(
                 f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 2500,
-                },
-                timeout=30,
+                payload
             )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"]
+            if not response:
+                logger.error("[DEVTO_ARTICLE] No response from any provider")
+                return None
+
+            # Parse response with better error handling
+            try:
+                response_data = response.json()
+                logger.debug(f"[DEVTO_ARTICLE] Response keys: {list(response_data.keys())}")
+                choices = response_data.get("choices", [])
+                if not choices:
+                    logger.error(f"[DEVTO_ARTICLE] No choices in response: {response_data}")
+                    return None
+                message = choices[0].get("message", {})
+                raw = message.get("content")
+                if raw is None:
+                    logger.error(f"[DEVTO_ARTICLE] No content in message. Message keys: {list(message.keys())}")
+                    return None
+            except Exception as parse_error:
+                logger.error(f"[DEVTO_ARTICLE] Failed to parse response: {parse_error}")
+                return None
             parsed = self._extract_json_object(raw)
             title = article_title.strip() or "A Practical Dev.to Take"
             body = ""
@@ -826,7 +1059,8 @@ Return JSON:
             "max_tokens": 1500,
         }
 
-        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+        self._reset_fallback_state()
+        response = self._make_api_call_with_fallback(f"{self.base_url}/chat/completions", payload)
         if response is None:
             logger.warning("[HUMANIZE_TUMBLR] API rewrite failed; using original draft")
             return title, body
@@ -969,7 +1203,8 @@ Return JSON:
             "max_tokens": 3000,
         }
 
-        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+        self._reset_fallback_state()
+        response = self._make_api_call_with_fallback(f"{self.base_url}/chat/completions", payload)
         if response is None:
             logger.warning("[HUMANIZE_BLOGGER] API rewrite failed; using original draft")
             return title, body
@@ -2249,7 +2484,7 @@ Example structure in body: [Problem explanation] → [Why it matters] → [Solut
             
             logger.debug(f"[API_REQUEST] Full request payload: {json.dumps(request_payload)[:500]}...")
             
-            # Make the API call with retry logic
+            # Make the API call with fallback support
             full_url = f"{self.base_url}/chat/completions"
             request_payload = {
                 "model": self.model,
@@ -2260,8 +2495,10 @@ Example structure in body: [Problem explanation] → [Why it matters] → [Solut
                 "temperature": 0.8,
                 "max_tokens": 3200
             }
-            
-            response = self._make_api_call_with_retry(full_url, request_payload)
+
+            # Reset fallback state before each generation
+            self._reset_fallback_state()
+            response = self._make_api_call_with_fallback(full_url, request_payload)
             
             if response is None:
                 logger.error("[API_ERROR] All retry attempts failed")
@@ -2443,22 +2680,39 @@ Question: {question}
 Write a genuine, conversational answer. Return ONLY valid JSON with "title" (exact question) and "body" (your answer)."""
 
         try:
-            response = requests.post(
+            # Reset fallback state before each generation
+            self._reset_fallback_state()
+            payload = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 800,
+            }
+            response = self._make_api_call_with_fallback(
                 f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 800,
-                },
-                timeout=30,
+                payload
             )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"]
+            if not response:
+                logger.error("[QUORA_ANSWER] No response from any provider")
+                return None
+
+            # Parse response with better error handling
+            try:
+                response_data = response.json()
+                choices = response_data.get("choices", [])
+                if not choices:
+                    logger.error(f"[QUORA_ANSWER] No choices in response")
+                    return None
+                message = choices[0].get("message", {})
+                raw = message.get("content")
+                if raw is None:
+                    logger.error(f"[QUORA_ANSWER] No content in message")
+                    return None
+            except Exception as parse_error:
+                logger.error(f"[QUORA_ANSWER] Failed to parse response: {parse_error}")
+                return None
             parsed = self._extract_json_object(raw)
             if not parsed:
                 logger.error("[QUORA_ANSWER] JSON parse failed")
@@ -2566,27 +2820,43 @@ Return ONLY valid JSON:
 }}"""
         
         try:
-            logger.info(f"[GEN_ARTICLE] Calling MegaLLM API for article: {article_title[:40]}")
-            response = requests.post(
+            logger.info(f"[GEN_ARTICLE] Calling API for article: {article_title[:40]}")
+            # Reset fallback state before each generation
+            self._reset_fallback_state()
+            payload = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.75,
+                "max_tokens": 3200
+            }
+            response = self._make_api_call_with_fallback(
                 f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": 0.75,
-                    "max_tokens": 3200
-                },
-                timeout=30
+                payload
             )
-            
+
+            if not response:
+                logger.error("[GEN_ARTICLE] No response from any provider")
+                return None
+
             logger.info(f"[API_RESPONSE] Status Code: {response.status_code}")
-            response.raise_for_status()
-            
-            data = response.json()
-            raw_response = data["choices"][0]["message"]["content"]
+
+            # Parse response with better error handling
+            try:
+                data = response.json()
+                choices = data.get("choices", [])
+                if not choices:
+                    logger.error(f"[GEN_ARTICLE] No choices in response")
+                    return None
+                message = choices[0].get("message", {})
+                raw_response = message.get("content")
+                if raw_response is None:
+                    logger.error(f"[GEN_ARTICLE] No content in message")
+                    return None
+            except Exception as parse_error:
+                logger.error(f"[GEN_ARTICLE] Failed to parse response: {parse_error}")
+                return None
             
             # Parse JSON from response
             cleaned = raw_response.replace("```json", "").replace("```", "").strip()
@@ -2720,7 +2990,6 @@ Return only JSON:
 }}"""
 
         expand_payload = {
-            "model": self.model,
             "messages": [
                 {"role": "system", "content": expand_system_prompt},
                 {"role": "user", "content": expand_user_prompt},
@@ -2729,7 +2998,8 @@ Return only JSON:
             "max_tokens": 3200,
         }
 
-        response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", expand_payload)
+        self._reset_fallback_state()
+        response = self._make_api_call_with_fallback(f"{self.base_url}/chat/completions", expand_payload)
         if response is None:
             logger.warning("[EXPAND] Expansion failed; returning original draft")
             return title, body
@@ -2774,7 +3044,10 @@ Return only JSON:
             List of dictionaries with "title" and "body" keys, or None on error
         """
         logger.info(f"[VARIANTS] Generating {num_variants} variants of blog: {blog_title[:40]}")
-        
+
+        # Reset fallback state before generating variants
+        self._reset_fallback_state()
+
         if not account_names or len(account_names) < num_variants:
             account_names = [f"Account {i+1}" for i in range(num_variants)]
 
@@ -2827,9 +3100,9 @@ Create one refined variant only. Return JSON object with title and body."""
 
             try:
                 logger.info(f"[VARIANTS] Requesting variant {idx+1}/{num_variants} for {account_name} ({focus})")
-                response = self._make_api_call_with_retry(f"{self.base_url}/chat/completions", payload)
+                response = self._make_api_call_with_fallback(f"{self.base_url}/chat/completions", payload)
                 if response is None:
-                    logger.warning(f"[VARIANTS] Variant {idx+1} failed after retries")
+                    logger.warning(f"[VARIANTS] Variant {idx+1} failed after all fallbacks")
                     continue
 
                 data = response.json()
